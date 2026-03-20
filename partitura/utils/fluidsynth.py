@@ -171,7 +171,7 @@ def synthesize_fluidsynth(
             ]
 
     # set to mono
-    synthesizer = Synth(samplerate=SAMPLE_RATE)
+    synthesizer = Synth(samplerate=samplerate)
     sf_id = synthesizer.sfload(soundfont)
 
     audio_signals = []
