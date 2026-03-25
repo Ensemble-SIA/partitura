@@ -2128,7 +2128,8 @@ def note_array_from_part(
         Default is False
     include_grace_notes : bool (optional)
         If `True`,  includes grace note information, i.e. if a note is a
-        grace note and the grace type "" for non grace notes).
+        grace note, the document order of the grace notes with the same onset 
+        and the grace type "" for non grace notes).
         Default is False
     include_staff : bool (optional)
         If `True`,  includes staff information
@@ -2176,12 +2177,16 @@ def note_array_from_part(
         If 'include_grace_notes' is True:
             * 'is_grace': 1 if the note is a grace 0 otherwise
             * 'grace_type' : the type of the grace notes "" for non grace notes
+            * 'local_grace_order' : the document order of the grace notes with the same onset 
+              (-1 for non grace notes)
 
         If 'include_staff' is True:
             * 'staff' : the staff number for each note
 
         If 'include_divs_per_quarter' is True:
             * 'divs_pq': the number of divs per quarter note
+
+    
     Examples
     --------
     >>> from partitura import load_musicxml, EXAMPLE_MUSICXML
@@ -2385,8 +2390,9 @@ def note_array_from_note_list(
         note. Default is False
     include_grace_notes : bool (optional)
         If `True`,  includes grace note information, i.e. if a note is a
-        grace note has one of the types "appoggiatura, acciaccatura, grace" and
-        the grace type "" for non grace notes).
+        grace note and has one of the types "appoggiatura, acciaccatura, grace" and
+        the grace type "" for non grace notes. 
+        It also includes the local grace note document order).
         Default is False
     include_staff : bool (optional)
         If `True`,  includes the staff number for every note.
@@ -2395,7 +2401,6 @@ def note_array_from_note_list(
         The number of divs (e.g. MIDI ticks, MusicXML ppq) per quarter
         note of the current part.
         Default is None
-
 
     Returns
     -------
@@ -2424,6 +2429,8 @@ def note_array_from_note_list(
               is `True`.
             * 'is_grace' : Is the note a grace note. Yes if true.
             * 'grace_type' : The type of grace note. "" for non grace notes.
+            * 'local_grace_order' : The document order of the grace notes with 
+              the same onset time. -1 for non grace notes.
             * 'ks_fifths': Fifths starting from C in the circle of fifths.
               Included if `key_signature_map` is not `None`.
             * 'mode': major or minor. Included If `key_signature_map` is
@@ -2463,7 +2470,7 @@ def note_array_from_note_list(
 
     # fields for pitch spelling
     if include_grace_notes:
-        fields += [("is_grace", "b"), ("grace_type", "U256")]
+        fields += [("is_grace", "b"), ("grace_type", "U256"), ("steal_proportion", "f4"), ("local_grace_order", "i4"), ("is_grace_chord", "b"), ("doc_order", "i4")]
 
     # fields for key signature
     if key_signature_map is not None:
@@ -2487,6 +2494,7 @@ def note_array_from_note_list(
     # field for divs_pq
     if divs_per_quarter:
         fields += [("divs_pq", "i4")]
+
 
     note_array = []
     for note in note_list:
@@ -2524,11 +2532,25 @@ def note_array_from_note_list(
 
         if include_grace_notes:
             is_grace = hasattr(note, "grace_type")
+            steal_proportion = -1.0
+            is_grace_chord = False
+            local_grace_order = -1
             if is_grace:
                 grace_type = note.grace_type
+                local_grace_order = 0
+                if hasattr(note, "steal_proportion"):
+                    steal_proportion = note.steal_proportion
+                    if steal_proportion is None:
+                        steal_proportion = -1.0
+                if hasattr(note, "is_grace_chord"):
+                    is_grace_chord = note.is_grace_chord
+
             else:
                 grace_type = ""
-            note_info += (is_grace, grace_type)
+
+            
+            note_info += (is_grace, grace_type, steal_proportion, local_grace_order, is_grace_chord, note.doc_order)
+
 
         if key_signature_map is not None:
             fifths, mode = key_signature_map(note.start.t)
@@ -2552,6 +2574,7 @@ def note_array_from_note_list(
 
         if divs_per_quarter:
             note_info += (divs_per_quarter,)
+            
 
         note_array.append(note_info)
 
@@ -2572,6 +2595,36 @@ def note_array_from_note_list(
     note_array = note_array[pitch_sort_idx]
     onset_sort_idx = np.argsort(note_array[onset_unit], kind="mergesort")
     note_array = note_array[onset_sort_idx]
+
+    if include_grace_notes:
+        # Compute local grace order for each group of grace notes with the same onset time and voice. Modify the note array in place
+        unique_onsets = np.unique(note_array[onset_unit])
+        for onset in unique_onsets:
+            onset_array = note_array[note_array[onset_unit] == onset]
+            grace_onset_array = onset_array[onset_array["is_grace"] == 1]
+            if len(grace_onset_array) > 0:
+                unique_voices = np.unique(grace_onset_array["voice"])
+                for voice in unique_voices:
+                    voice_grace_onset_array = grace_onset_array[grace_onset_array["voice"] == voice]
+                    min_doc_order = voice_grace_onset_array["doc_order"].min()
+                    unique_nids = np.unique(voice_grace_onset_array["id"])
+                    local_order_val = 0
+                    chord_flag = False
+                    for nid in unique_nids:
+                        row_idx = np.where((note_array["id"] == nid))[0]
+                        if note_array[row_idx]["is_grace_chord"] == True:
+                            chord_flag = True
+                        else:
+                            chord_flag = False
+                        note_array["local_grace_order"][row_idx] = local_order_val
+                        if chord_flag:
+                            continue
+                        else:
+                            local_order_val += 1
+            
+
+        note_array = np.lib.recfunctions.drop_fields(note_array, "is_grace_chord")
+        note_array = np.lib.recfunctions.drop_fields(note_array, "doc_order")
 
     return note_array
 

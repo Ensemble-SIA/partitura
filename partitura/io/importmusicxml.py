@@ -1337,10 +1337,14 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     # code in handle_tuplet function)
 
     chord = e.find("chord")
+    is_grace_chord = False
     if chord is not None:
         # this note starts at the same position as the previous note, and has
         # same duration
         assert prev_note is not None
+        is_grace_chord = True
+        if prev_note.is_grace_chord == False:
+            prev_note.is_grace_chord = True
         position = prev_note.start.t
         duration = prev_note.duration
         duration_from_symbolic = prev_note.duration_from_symbolic
@@ -1394,6 +1398,7 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
                 steal_proportion=steal_proportion,
                 doc_order=doc_order,
                 stem_direction=stem_dir,
+                is_grace_chord=is_grace_chord,
             )
             if isinstance(prev_note, score.GraceNote) and prev_note.voice == voice:
                 note.grace_prev = prev_note
@@ -1432,6 +1437,7 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
                 technical=technical_notations,
                 doc_order=doc_order,
                 stem_direction=stem_dir,
+                is_grace_chord=is_grace_chord,
             )
 
         if isinstance(prev_note, score.GraceNote) and prev_note.voice == voice:
