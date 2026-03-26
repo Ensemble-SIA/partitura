@@ -2535,6 +2535,7 @@ def note_array_from_note_list(
             steal_proportion = -1.0
             is_grace_chord = False
             local_grace_order = -1
+            doc_order = note.doc_order if hasattr(note, "doc_order") else -1
             if is_grace:
                 grace_type = note.grace_type
                 local_grace_order = 0
@@ -2549,7 +2550,7 @@ def note_array_from_note_list(
                 grace_type = ""
 
             
-            note_info += (is_grace, grace_type, steal_proportion, local_grace_order, is_grace_chord, note.doc_order)
+            note_info += (is_grace, grace_type, steal_proportion, local_grace_order, is_grace_chord, doc_order)
 
 
         if key_signature_map is not None:
@@ -2597,7 +2598,7 @@ def note_array_from_note_list(
     note_array = note_array[onset_sort_idx]
 
     if include_grace_notes:
-        # Compute local grace order for each group of grace notes with the same onset time and voice. Modify the note array in place
+        # Compute local grace order for each group of grace notes with the same onset time and voice.
         unique_onsets = np.unique(note_array[onset_unit])
         for onset in unique_onsets:
             onset_array = note_array[note_array[onset_unit] == onset]
