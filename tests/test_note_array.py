@@ -13,7 +13,7 @@ from partitura.utils.music import note_array_from_part, ensure_notearray
 from partitura.musicanalysis import note_array_to_score
 import numpy as np
 
-from tests import NOTE_ARRAY_TESTFILES, KERN_TESTFILES, METRICAL_POSITION_TESTFILES
+from tests import NOTE_ARRAY_TESTFILES, KERN_TESTFILES, METRICAL_POSITION_TESTFILES, GRACE_NOTE_DOC_ORDER_TESTFILES
 
 
 class TestNoteArray(unittest.TestCase):
@@ -229,6 +229,41 @@ class TestNoteArray(unittest.TestCase):
                 # field.
                 self.assertTrue(field_name in na.dtype.names)
 
+    def test_gracenote_doc_order(self):
+        """
+        Test that the document order of grace notes is correctly reflected in the note array.
+        """
+        for fn in GRACE_NOTE_DOC_ORDER_TESTFILES:
+            score_part = load_musicxml(fn)[0]
+            sna = score_part.note_array(include_grace_notes=True)
+
+            expected_field_names = [
+                "is_grace",
+                "grace_type",
+                "steal_proportion",
+                "local_grace_order",
+            ]
+            
+            for field_name in expected_field_names:
+                self.assertTrue(field_name in sna.dtype.names)
+            
+            grace_notes_array = sna[sna["is_grace"] == 1]
+            local_grace_order_values = grace_notes_array["local_grace_order"]
+
+            if 'non_chord' in fn:
+                # check that all the local_grace_order_values are unique
+                self.assertTrue(len(local_grace_order_values)==len(set(local_grace_order_values)))
+            
+            elif 'mixed_chord' in fn:
+                # check that the set of local_grace_order_values is equal to 4
+                self.assertTrue(len(local_grace_order_values) == 7)
+                self.assertTrue(set(local_grace_order_values) == set([0,1,2,3]))
+            
+            else:
+
+                # check that all the local_grace_order values are the same
+                self.assertTrue(np.all(local_grace_order_values == local_grace_order_values[0]))
+                
 
 if __name__ == "__main__":
     unittest.main()

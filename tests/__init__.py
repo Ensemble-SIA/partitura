@@ -283,3 +283,12 @@ MUSICXML_CHORD_FEATURES = [
 MXL_TESTFILES = [
     os.path.join(MXL_PATH, fn) for fn in ["mozart_k265_6.mxl"]
 ]
+
+GRACE_NOTE_DOC_ORDER_TESTFILES = [
+    os.path.join(MUSICXML_PATH, fn) 
+    for fn in [
+        "test_acciaccatura_non_chord.musicxml", 
+        "test_acciaccatura_chord.musicxml", 
+        "test_acciaccatura_mixed_chord.musicxml"
+        ]
+]
