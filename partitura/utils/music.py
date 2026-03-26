@@ -2429,6 +2429,8 @@ def note_array_from_note_list(
               is `True`.
             * 'is_grace' : Is the note a grace note. Yes if true.
             * 'grace_type' : The type of grace note. "" for non grace notes.
+            * 'steal_proportion' : The proportion of the duration that the grace 
+              note steals from the neighbouring note.
             * 'local_grace_order' : The document order of the grace notes with 
               the same onset time. -1 for non grace notes.
             * 'ks_fifths': Fifths starting from C in the circle of fifths.
@@ -2468,7 +2470,7 @@ def note_array_from_note_list(
     if include_pitch_spelling:
         fields += [("step", "U256"), ("alter", "i4"), ("octave", "i4")]
 
-    # fields for pitch spelling
+    # fields for grace notes
     if include_grace_notes:
         fields += [("is_grace", "b"), ("grace_type", "U256"), ("steal_proportion", "f4"), ("local_grace_order", "i4"), ("is_grace_chord", "b"), ("doc_order", "i4")]
 
@@ -2535,7 +2537,14 @@ def note_array_from_note_list(
             steal_proportion = -1.0
             is_grace_chord = False
             local_grace_order = -1
-            doc_order = note.doc_order if hasattr(note, "doc_order") else -1
+
+            if hasattr(note, "doc_order"):
+                doc_order = note.doc_order
+                if doc_order is None:
+                    doc_order = -1
+            else:
+                doc_order = -1
+                
             if is_grace:
                 grace_type = note.grace_type
                 local_grace_order = 0
@@ -2545,6 +2554,8 @@ def note_array_from_note_list(
                         steal_proportion = -1.0
                 if hasattr(note, "is_grace_chord"):
                     is_grace_chord = note.is_grace_chord
+                    if is_grace_chord is None:
+                        is_grace_chord = False
 
             else:
                 grace_type = ""
