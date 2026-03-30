@@ -2473,6 +2473,8 @@ def note_array_from_note_list(
     # fields for grace notes
     if include_grace_notes:
         fields += [("is_grace", "b"), ("grace_type", "U256"), ("steal_proportion", "f4"), ("local_grace_order", "i4"), ("is_grace_chord", "b"), ("doc_order", "i4")]
+        if not include_staff:
+            fields += [("staff", "i4")]
 
     # fields for key signature
     if key_signature_map is not None:
@@ -2562,6 +2564,9 @@ def note_array_from_note_list(
 
             
             note_info += (is_grace, grace_type, steal_proportion, local_grace_order, is_grace_chord, doc_order)
+            if not include_staff:
+                 staff = note.staff if note.staff is not None else 0
+                 note_info += (staff,)
 
 
         if key_signature_map is not None:
@@ -2615,14 +2620,15 @@ def note_array_from_note_list(
             onset_array = note_array[note_array[onset_unit] == onset]
             grace_onset_array = onset_array[onset_array["is_grace"] == 1]
             if len(grace_onset_array) > 0:
-                unique_voices = np.unique(grace_onset_array["voice"])
-                for voice in unique_voices:
-                    voice_grace_onset_array = grace_onset_array[grace_onset_array["voice"] == voice]
-                    min_doc_order = voice_grace_onset_array["doc_order"].min()
-                    unique_nids = np.unique(voice_grace_onset_array["id"])
+                unique_staffs = np.unique(grace_onset_array["staff"])
+                for staff in unique_staffs:
+                    staff_grace_onset_array = grace_onset_array[grace_onset_array["staff"] == staff]
+                    # sort by document order
+                    staff_grace_onset_array = staff_grace_onset_array[np.argsort(staff_grace_onset_array["doc_order"])]
                     local_order_val = 0
                     chord_flag = False
-                    for nid in unique_nids:
+                    for row in staff_grace_onset_array:
+                        nid = row["id"]
                         row_idx = np.where((note_array["id"] == nid))[0]
                         if note_array[row_idx]["is_grace_chord"] == True:
                             chord_flag = True
@@ -2637,6 +2643,8 @@ def note_array_from_note_list(
 
         note_array = np.lib.recfunctions.drop_fields(note_array, "is_grace_chord")
         note_array = np.lib.recfunctions.drop_fields(note_array, "doc_order")
+        if not include_staff:
+            note_array = np.lib.recfunctions.drop_fields(note_array, "staff")
 
     return note_array
 
