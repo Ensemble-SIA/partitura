@@ -292,3 +292,5 @@ GRACE_NOTE_DOC_ORDER_TESTFILES = [
         "test_acciaccatura_mixed_chord.musicxml"
         ]
 ]
+
+DOUBLE_NOTE_TESTFILE = os.path.join(MUSICXML_PATH, "test_double_notes.musicxml")
