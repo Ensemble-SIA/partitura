@@ -3805,14 +3805,18 @@ def expand_grace_notes_from_local_grace_order(
     return score_note_array
 
 
-def remove_double_notes_from_score(
-    score_part: Any,
+def remove_double_notes_from_score_note_array(
+    score_note_array: np.ndarray,
     choose_longer_note: bool = False,
 ) -> np.ndarray:
     '''
     Remove double notes from the score note array. Double notes are defined as notes that have the same onset time and pitch.
     Such notes are usually meant for visually indicating an overarching melody within a group of voices/notes.
     These double notes need to be removed for various applications such as alignment of score and performance/rehearsal.
+    
+    IMPORTANT! The score note array must be generated with the 'include_grace_notes' parameter set to True 
+    in order for the double notes to be correctly identified and removed, 
+    since some of the double notes can be grace notes.
     
     Parameters
     ----------
@@ -3827,9 +3831,11 @@ def remove_double_notes_from_score(
     score_note_array_no_double: np.ndarray
         A note array of the score with the double notes removed.
     '''
+
+    if 'is_grace' not in score_note_array.dtype.names:
+        raise ValueError("The score_note_array must have the 'is_grace' column in order to remove double notes correctly.")
     
     # get the unique onsets in the score_note_array
-    score_note_array = score_part.note_array(include_grace_notes=True)
     unique_onsets = np.unique(score_note_array['onset_beat'])
     score_note_array_no_double = score_note_array.copy()
     for onset in unique_onsets:

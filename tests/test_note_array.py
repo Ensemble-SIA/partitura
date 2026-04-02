@@ -9,7 +9,7 @@ import unittest
 
 import partitura.score as score
 from partitura import load_musicxml, load_kern, load_score
-from partitura.utils.music import note_array_from_part, ensure_notearray, expand_grace_notes_from_local_grace_order, remove_double_notes_from_score
+from partitura.utils.music import note_array_from_part, ensure_notearray, expand_grace_notes_from_local_grace_order, remove_double_notes_from_score_note_array
 from partitura.musicanalysis import note_array_to_score
 import numpy as np
 
@@ -322,13 +322,13 @@ class TestNoteArray(unittest.TestCase):
         Test that the remove_double_notes_from_score function correctly removes double notes from the score.
         """
         score_part = load_musicxml(DOUBLE_NOTE_TESTFILE)[0]
-        sna = score_part.note_array()
+        sna = score_part.note_array(include_grace_notes=True)
 
         for i in range(2):
             if i == 0:
-                sna_no_double = remove_double_notes_from_score(score_part)
+                sna_no_double = remove_double_notes_from_score_note_array(sna)
             else:
-                sna_no_double = remove_double_notes_from_score(score_part, choose_longer_note=True)
+                sna_no_double = remove_double_notes_from_score_note_array(sna, choose_longer_note=True)
             
             # check that the number of notes in sna_no_double is less than the number of notes in sna
             self.assertTrue(len(sna) - len(sna_no_double) == 3)
