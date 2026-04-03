@@ -3700,7 +3700,7 @@ def expand_grace_notes_from_local_grace_order(
         
         if len(grace_notes_at_onset) > 0:
             # get the grace_type of the grace notes at this onset
-            grace_types = grace_notes_at_onset['grace_type']
+            grace_types = set(grace_notes_at_onset['grace_type'])
             for grace_type in grace_types:
                 grace_notes_at_onset_and_type = grace_notes_at_onset[grace_notes_at_onset['grace_type'] == grace_type]
                 # sort the grace notes at this onset and type by their local_grace_order in ascending order
@@ -3740,11 +3740,11 @@ def expand_grace_notes_from_local_grace_order(
                         for row in grace_notes_at_onset_and_type_and_staff:
                             # update the values in the score_note_array for this grace note given the id value
                             score_note_array['onset_beat'][score_note_array['id'] == row['id']] = onset + duration_per_appoggiatura * row['local_grace_order'] * ts_beat_type/4
-                            score_note_array['duration_beat'][score_note_array['id'] == row['id']] = duration_per_appoggiatura * ts_beat_type/4
+                            score_note_array['duration_beat'][score_note_array['id'] == row['id']] += duration_per_appoggiatura * ts_beat_type/4
                             score_note_array['onset_quarter'][score_note_array['id'] == row['id']] = onset + duration_per_appoggiatura * row['local_grace_order']
-                            score_note_array['duration_quarter'][score_note_array['id'] == row['id']] = duration_per_appoggiatura
+                            score_note_array['duration_quarter'][score_note_array['id'] == row['id']] += duration_per_appoggiatura
                             score_note_array['onset_div'][score_note_array['id'] == row['id']] = ((onset + duration_per_appoggiatura * row['local_grace_order']) * row['divs_pq']).astype(int)
-                            score_note_array['duration_div'][score_note_array['id'] == row['id']] = (duration_per_appoggiatura * row['divs_pq']).astype(int)
+                            score_note_array['duration_div'][score_note_array['id'] == row['id']] += (duration_per_appoggiatura * row['divs_pq']).astype(int)
 
                     else: # acciaccatura
                         previous_non_grace_notes_at_staff_and_onset = score_note_array[
@@ -3789,11 +3789,11 @@ def expand_grace_notes_from_local_grace_order(
                         for row in grace_notes_at_onset_and_type_and_staff:
                             # update the values in the score_note_array for this grace note given the id value
                             score_note_array['onset_beat'][score_note_array['id'] == row['id']] = prev_onset_beat + duration_per_acciaccatura * (row['local_grace_order']) * ts_beat_type/4
-                            score_note_array['duration_beat'][score_note_array['id'] == row['id']] = duration_per_acciaccatura * ts_beat_type/4
+                            score_note_array['duration_beat'][score_note_array['id'] == row['id']] += duration_per_acciaccatura * ts_beat_type/4
                             score_note_array['onset_quarter'][score_note_array['id'] == row['id']] = prev_onset_quarter + duration_per_acciaccatura * (row['local_grace_order'])
-                            score_note_array['duration_quarter'][score_note_array['id'] == row['id']] = duration_per_acciaccatura
+                            score_note_array['duration_quarter'][score_note_array['id'] == row['id']] += duration_per_acciaccatura
                             score_note_array['onset_div'][score_note_array['id'] == row['id']] = ((prev_onset_div + duration_per_acciaccatura * (row['local_grace_order'])) * row['divs_pq']).astype(int)
-                            score_note_array['duration_div'][score_note_array['id'] == row['id']] = (duration_per_acciaccatura * row['divs_pq']).astype(int)
+                            score_note_array['duration_div'][score_note_array['id'] == row['id']] += (duration_per_acciaccatura * row['divs_pq']).astype(int)
 
         
         # update the previous_non_grace_notes for this staff to be the current main non-grace notes at this onset and staff

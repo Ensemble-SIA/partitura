@@ -271,17 +271,20 @@ class TestNoteArray(unittest.TestCase):
         
         for fn in GRACE_NOTE_DOC_ORDER_TESTFILES:
             score_part = load_musicxml(fn)[0]
+            sna = score_part.note_array(include_grace_notes=True)
             expanded_note_array = expand_grace_notes_from_local_grace_order(score_part, grace_offset_quarter=0.25)
 
             if 'non_chord' in fn:
                 # check that the grace notes are expanded by 0.25 quarter notes before the main note
                 main_note_onset = expanded_note_array[expanded_note_array["is_grace"] == 0]["onset_beat"][0]
                 grace_note_onsets = expanded_note_array[expanded_note_array["is_grace"] == 1]["onset_beat"]
-                grace_note_durations = expanded_note_array[expanded_note_array["is_grace"] == 1]["duration_beat"]
                 grace_notes_length = len(grace_note_onsets)
 
                 self.assertTrue(grace_note_onsets[0] == main_note_onset - 0.25)
-                self.assertTrue(np.all(grace_note_durations == 0.25/grace_notes_length))
+
+                grace_notes_expanded = expanded_note_array[expanded_note_array["is_grace"] == 1]
+                grace_notes_original = sna[sna["is_grace"] == 1]
+                self.assertTrue(np.allclose(grace_notes_expanded["duration_beat"], grace_notes_original["duration_beat"] + 0.05))
 
                 # convert all the grace note onsets to .2f values
                 grace_note_onsets_rounded = np.round(grace_note_onsets, 2)
@@ -301,13 +304,12 @@ class TestNoteArray(unittest.TestCase):
                 self.assertTrue(len(unique_grace_note_onsets) == 4)
                 self.assertTrue(len(grace_note_onsets) == 7)
                 
-                grace_note_durations = expanded_note_array[expanded_note_array["is_grace"] == 1]["duration_beat"]
                 grace_notes_length = len(grace_note_onsets)
-                unique_grace_notes_length = len(unique_grace_note_onsets)
-
-                # check that the durations of the grace notes with the same onset are equal, 
-                # and that they are equal to 0.25 divided by the number of unique grace note onsets
-                self.assertTrue(np.all(grace_note_durations == 0.25/unique_grace_notes_length))
+                
+                grace_notes_expanded = expanded_note_array[expanded_note_array["is_grace"] == 1]
+                grace_notes_original = sna[sna["is_grace"] == 1]
+                for i in range(len(grace_notes_expanded)):
+                    self.assertTrue(grace_notes_expanded["duration_beat"][i] == grace_notes_original["duration_beat"][i] + 0.0625)
 
                 # validate first grace note onset
                 self.assertTrue(grace_note_onsets[0] == main_note_onset - 0.25)
@@ -315,6 +317,13 @@ class TestNoteArray(unittest.TestCase):
                 true_onsets = np.array([-0.25, -0.1875, -0.125, -0.0625, -0.0625, -0.0625, -0.0625])
 
                 self.assertTrue(np.allclose(grace_note_onsets, true_onsets))
+
+            else:
+                # check that the grace notes in expanded_note_array have a duration of 0.25 more than the corresponding grace notes in sna
+                grace_notes_expanded = expanded_note_array[expanded_note_array["is_grace"] == 1]
+                grace_notes_original = sna[sna["is_grace"] == 1]
+                for i in range(len(grace_notes_expanded)):
+                    self.assertTrue(grace_notes_expanded["duration_beat"][i] == grace_notes_original["duration_beat"][i] + 0.25)
 
 
     def test_remove_double_notes_from_score(self):
