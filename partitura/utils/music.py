@@ -3657,6 +3657,7 @@ def ensure_grace_duration(
 def expand_grace_notes_from_local_grace_order(
         score_part: Any,
         grace_offset_quarter: float = 1/4,
+        **kwargs,
         ) -> np.ndarray:
     '''
     Expand grace notes by time and duration in the score note array based on their local grace order.
@@ -3685,7 +3686,7 @@ def expand_grace_notes_from_local_grace_order(
         A note array with the grace notes expanded by time and duration based on their local grace order.
     '''
 
-    score_note_array = score_part.note_array(include_staff=True, include_grace_notes=True, include_time_signature=True, include_divs_per_quarter=True)
+    score_note_array = score_part.note_array(include_staff=True, include_grace_notes=True, include_time_signature=True, include_divs_per_quarter=True, **kwargs)
     unique_onsets = np.unique(score_note_array['onset_beat'])
     min_onset = score_note_array['onset_beat'].min()
     min_onset_previous = min_onset - grace_offset_quarter
@@ -3833,7 +3834,7 @@ def remove_double_notes_from_score_note_array(
     '''
 
     if 'is_grace' not in score_note_array.dtype.names:
-        raise ValueError("The score_note_array must have the 'is_grace' column in order to remove double notes correctly.")
+        raise ValueError("The score_note_array must have the 'is_grace' column in order to remove double notes correctly. Pass the 'include_grace_notes=True' argument when generating the score_note_array to include the 'is_grace' column.")
     
     # get the unique onsets in the score_note_array
     unique_onsets = np.unique(score_note_array['onset_beat'])
