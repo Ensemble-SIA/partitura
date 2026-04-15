@@ -3851,8 +3851,9 @@ def remove_double_notes_from_score_note_array(
                 else:
                     note_to_keep = non_grace_notes_at_onset_and_pitch[np.argmin(non_grace_notes_at_onset_and_pitch['duration_beat'])]
                 
-                note_to_remove = non_grace_notes_at_onset_and_pitch[non_grace_notes_at_onset_and_pitch != note_to_keep]
-                score_note_array_no_double = score_note_array_no_double[score_note_array_no_double != note_to_remove]
+                notes_to_remove = non_grace_notes_at_onset_and_pitch[non_grace_notes_at_onset_and_pitch != note_to_keep]
+                for note_to_remove in notes_to_remove:
+                    score_note_array_no_double = score_note_array_no_double[score_note_array_no_double != note_to_remove]
 
     return score_note_array_no_double
 
