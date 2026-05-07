@@ -1479,7 +1479,18 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
 
     ties = e.findall("tie")
     if len(ties) > 0:
-        tie_key = ("tie", getattr(note, "midi_pitch", "rest"))
+        # Ensemble fork: scope tie matching by (staff, voice, midi_pitch).
+        # Upstream keyed by midi_pitch alone, which lets a same-pitch tie
+        # chain in voice A overwrite an in-flight chain in voice B (and
+        # then voice A's tie-stop deletes the entry), leaving voice B's
+        # tie-stop unlinked. MusicXML scopes ties by voice within a part;
+        # add staff for safety on multi-staff parts.
+        tie_key = (
+            "tie",
+            getattr(note, "staff", None),
+            getattr(note, "voice", None),
+            getattr(note, "midi_pitch", "rest"),
+        )
         tie_types = set(tie.attrib["type"] for tie in ties)
 
         if "stop" in tie_types:
