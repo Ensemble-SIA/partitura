@@ -1479,30 +1479,42 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
 
     ties = e.findall("tie")
     if len(ties) > 0:
-        # Ensemble fork: scope tie matching by (staff, voice, midi_pitch).
-        # Upstream keyed by midi_pitch alone, which lets a same-pitch tie
-        # chain in voice A overwrite an in-flight chain in voice B (and
-        # then voice A's tie-stop deletes the entry), leaving voice B's
-        # tie-stop unlinked. MusicXML scopes ties by voice within a part;
-        # add staff for safety on multi-staff parts.
-        tie_key = (
-            "tie",
-            getattr(note, "staff", None),
-            getattr(note, "voice", None),
-            getattr(note, "midi_pitch", "rest"),
-        )
+        # Ensemble fork: two-tier tie-matching key. Primary key is
+        # (staff, voice, midi_pitch) — same-voice ties are the common case
+        # and same-pitch-different-voice tie chains must NOT collide
+        # (upstream's pitch-only key has voice A's start overwriting voice
+        # B's in-flight entry, then voice A's stop deleting it, leaving
+        # voice B's stop unlinked — Bach BWV 875 bars 22-23 v2 G4).
+        #
+        # Fallback key is (staff, midi_pitch) — cross-voice ties (a held
+        # note whose voice changes mid-chain — Brahms Op 118/2 bars 18-19
+        # v1→v2 E4, Liszt Ballade 2 bars 33-34 v5→v6 F#3) need to link
+        # across voices. Try voiced first; if no match, try unvoiced.
+        # Both keys are populated on a tie-start, so voiced lookups always
+        # win when the chain stays in one voice.
+        staff = getattr(note, "staff", None)
+        voice = getattr(note, "voice", None)
+        pitch = getattr(note, "midi_pitch", "rest")
+        tie_key = ("tie", staff, voice, pitch)
+        tie_key_unvoiced = ("tie", staff, pitch)
         tie_types = set(tie.attrib["type"] for tie in ties)
 
         if "stop" in tie_types:
-            tie_prev = ongoing.get(tie_key, None)
+            tie_prev = ongoing.get(tie_key, None) or ongoing.get(tie_key_unvoiced, None)
 
             if tie_prev:
                 note.tie_prev = tie_prev
                 tie_prev.tie_next = note
-                del ongoing[tie_key]
+                # Clear both keyspaces — whichever held the entry is gone
+                # now, and the unvoiced fallback must not re-link this
+                # chain to a later unrelated tie-stop.
+                for k in (tie_key, tie_key_unvoiced):
+                    if ongoing.get(k) is tie_prev:
+                        del ongoing[k]
 
         if "start" in tie_types:
             ongoing[tie_key] = note
+            ongoing[tie_key_unvoiced] = note
 
     notations = e.find("notations")
 
