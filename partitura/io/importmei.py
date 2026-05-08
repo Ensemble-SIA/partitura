@@ -600,15 +600,16 @@ class MeiParser(object):
 
         if el.get("sameas") is not None:
             ref_id = el.get("sameas")
-            ref_id = ref_id.lstrip("#")   
+            ref_id = ref_id.lstrip("#")
             root = self.document.getroot()
-            found_element = root.xpath(f"//*[@xml:id='{ref_id}']",
-                                       namespaces={"xml":self.ns})
+            found_element = root.xpath(
+                f"//*[@xml:id='{ref_id}']", namespaces={"xml": self.ns}
+            )
             if found_element is not None:
                 symbolic_duration = self._get_symbolic_duration(found_element[0])
             else:
                 symbolic_duration = 0
-        
+
         else:
             symbolic_duration = self._get_symbolic_duration(el)
 
