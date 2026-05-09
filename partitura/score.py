@@ -2863,6 +2863,13 @@ class Measure(TimedObject):
         The running count independent of measure regularity/ volta endings, continuously counting up all measures in a musicxml score file and always starting from one.
     name : string, optional
         The ID of the measure in a given musicxml score file. Can be a non-number in case of volta endings, irregular measures (i.e., pickup measures in the middle of the piece). Defaults to None
+    implicit : bool, optional
+        Whether the source `<measure>` element carried `implicit="yes"`
+        (anacrusis/pickup or mid-piece irregular measure that doesn't
+        increment the printed bar number). Defaults to False. Consumers
+        that anchor pickup positions to the right edge of the notional
+        full bar (count-back convention) read this flag to detect
+        which measures need the right-aligned transform.
 
     Attributes
     ----------
@@ -2870,13 +2877,21 @@ class Measure(TimedObject):
         See parameters
     name : str
         See parameters
+    implicit : bool
+        See parameters
 
     """
 
-    def __init__(self, number=None, name=None):
+    # Class-level default so constructions that bypass __init__ still
+    # carry the attribute (mirrors the pattern used for chord_root_note_id
+    # on GenericNote).
+    implicit: bool = False
+
+    def __init__(self, number=None, name=None, implicit=False):
         super().__init__()
         self.number = number
         self.name = name
+        self.implicit = implicit
 
     def __str__(self):
         return f"{super().__str__()} number={self.number} name={self.name}"

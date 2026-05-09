@@ -872,6 +872,11 @@ def make_measure(xml_measure, measure_counter):
 
     measure.number = measure_counter
     measure.name = get_value_from_attribute(xml_measure, "number", str)
+    # Preserve `<measure implicit="yes">` semantic for downstream consumers
+    # that need to recognize anacrusis / mid-piece irregular measures
+    # (e.g., right-aligned pickup convention). Opt-in: defaults to False
+    # (the class-level default) when the attribute is absent.
+    measure.implicit = get_value_from_attribute(xml_measure, "implicit", str) == "yes"
 
     return measure
 
