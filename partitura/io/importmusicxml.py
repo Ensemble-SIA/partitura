@@ -1530,6 +1530,28 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
         )
     part.add(note, position, position + duration)
 
+    # Ensemble fork: chord_root_note_id propagation. Partitura natively has
+    # no Chord container, so chord membership is implicit (notes sharing
+    # start.t in document order with the first marked by no <chord/> and
+    # subsequent members marked by <chord/>). This fork attaches an
+    # explicit chord_root_note_id pointer so downstream consumers can find
+    # chord siblings by EUUID dereference.
+    #
+    # Logic mirrors the existing prev_note state machine the function
+    # already maintains for chord position/duration inheritance:
+    #   - This note has <chord/>: it's a chord member. Its chord_root_note_id
+    #     points at the cluster's first note. We retrieve it from prev_note;
+    #     if prev_note's chord_root_note_id is still None (we previously
+    #     assumed standalone), upgrade prev_note in-place: it's now
+    #     confirmed as a root, so prev_note.chord_root_note_id = prev_note.id.
+    #   - This note has no <chord/>: standalone for now. chord_root_note_id
+    #     stays at the GenericNote default (None). If a subsequent <chord/>
+    #     note arrives, it'll upgrade us (above).
+    if chord is not None:
+        if prev_note.chord_root_note_id is None:
+            prev_note.chord_root_note_id = prev_note.id
+        note.chord_root_note_id = prev_note.chord_root_note_id
+
     # After note is assigned to part we can assign the beam to the note if it exists
     if isinstance(beam, score.Beam):
         note.assign_beam(beam)

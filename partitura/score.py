@@ -1984,6 +1984,17 @@ class GenericNote(TimedObject):
         self.slur_starts = []
         self.tuplet_stops = []
         self.tuplet_starts = []
+        # Ensemble fork: chord_root_note_id is the source <note id> of the
+        # chord cluster's first member (the chord root). Set during
+        # MusicXML import in io/importmusicxml.py:_handle_note. None for
+        # standalone (non-chord) notes; equals self.id for chord roots;
+        # equals the root's id for chord members. Lets downstream consumers
+        # find chord siblings by EUUID dereference instead of coordinate
+        # matching ("same start.t, same voice, same staff" adjacency).
+        # Importers other than MusicXML leave this as None — partitura
+        # natively has no Chord container, so chord identity is only
+        # meaningful when the source had explicit <chord/> markers.
+        self.chord_root_note_id = None
 
         # maintain a list of attributes to update when cloning this instance
         self._ref_attrs.extend(
