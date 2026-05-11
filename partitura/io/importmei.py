@@ -162,7 +162,7 @@ class MeiParser(object):
 
         if use_verovio:
             tk = verovio.toolkit(True)
-            tk.loadFile(mei_path)
+            tk.loadFile(str(mei_path))
             mei_score = tk.getMEI("basic")
             # document = etree.parse(mei_score, parser)
             root = etree.fromstring(mei_score.encode("utf-8"), parser)
