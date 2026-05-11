@@ -2128,7 +2128,8 @@ def note_array_from_part(
         Default is False
     include_grace_notes : bool (optional)
         If `True`,  includes grace note information, i.e. if a note is a
-        grace note and the grace type "" for non grace notes).
+        grace note, the document order of the grace notes with the same onset 
+        and the grace type "" for non grace notes).
         Default is False
     include_staff : bool (optional)
         If `True`,  includes staff information
@@ -2176,12 +2177,16 @@ def note_array_from_part(
         If 'include_grace_notes' is True:
             * 'is_grace': 1 if the note is a grace 0 otherwise
             * 'grace_type' : the type of the grace notes "" for non grace notes
+            * 'local_grace_order' : the document order of the grace notes with the same onset 
+              (-1 for non grace notes)
 
         If 'include_staff' is True:
             * 'staff' : the staff number for each note
 
         If 'include_divs_per_quarter' is True:
             * 'divs_pq': the number of divs per quarter note
+
+    
     Examples
     --------
     >>> from partitura import load_musicxml, EXAMPLE_MUSICXML
@@ -2385,8 +2390,9 @@ def note_array_from_note_list(
         note. Default is False
     include_grace_notes : bool (optional)
         If `True`,  includes grace note information, i.e. if a note is a
-        grace note has one of the types "appoggiatura, acciaccatura, grace" and
-        the grace type "" for non grace notes).
+        grace note and has one of the types "appoggiatura, acciaccatura, grace" and
+        the grace type "" for non grace notes. 
+        It also includes the local grace note document order).
         Default is False
     include_staff : bool (optional)
         If `True`,  includes the staff number for every note.
@@ -2395,7 +2401,6 @@ def note_array_from_note_list(
         The number of divs (e.g. MIDI ticks, MusicXML ppq) per quarter
         note of the current part.
         Default is None
-
 
     Returns
     -------
@@ -2424,6 +2429,10 @@ def note_array_from_note_list(
               is `True`.
             * 'is_grace' : Is the note a grace note. Yes if true.
             * 'grace_type' : The type of grace note. "" for non grace notes.
+            * 'steal_proportion' : The proportion of the duration that the grace 
+              note steals from the neighbouring note.
+            * 'local_grace_order' : The document order of the grace notes with 
+              the same onset time. -1 for non grace notes.
             * 'ks_fifths': Fifths starting from C in the circle of fifths.
               Included if `key_signature_map` is not `None`.
             * 'mode': major or minor. Included If `key_signature_map` is
@@ -2461,9 +2470,11 @@ def note_array_from_note_list(
     if include_pitch_spelling:
         fields += [("step", "U256"), ("alter", "i4"), ("octave", "i4")]
 
-    # fields for pitch spelling
+    # fields for grace notes
     if include_grace_notes:
-        fields += [("is_grace", "b"), ("grace_type", "U256")]
+        fields += [("is_grace", "b"), ("grace_type", "U256"), ("steal_proportion", "f4"), ("local_grace_order", "i4"), ("is_grace_chord", "b"), ("doc_order", "i4")]
+        if not include_staff:
+            fields += [("staff", "i4")]
 
     # fields for key signature
     if key_signature_map is not None:
@@ -2487,6 +2498,7 @@ def note_array_from_note_list(
     # field for divs_pq
     if divs_per_quarter:
         fields += [("divs_pq", "i4")]
+
 
     note_array = []
     for note in note_list:
@@ -2524,11 +2536,38 @@ def note_array_from_note_list(
 
         if include_grace_notes:
             is_grace = hasattr(note, "grace_type")
+            steal_proportion = -1.0
+            is_grace_chord = False
+            local_grace_order = -1
+
+            if hasattr(note, "doc_order"):
+                doc_order = note.doc_order
+                if doc_order is None:
+                    doc_order = -1
+            else:
+                doc_order = -1
+                
             if is_grace:
                 grace_type = note.grace_type
+                local_grace_order = 0
+                if hasattr(note, "steal_proportion"):
+                    steal_proportion = note.steal_proportion
+                    if steal_proportion is None:
+                        steal_proportion = -1.0
+                if hasattr(note, "is_grace_chord"):
+                    is_grace_chord = note.is_grace_chord
+                    if is_grace_chord is None:
+                        is_grace_chord = False
+
             else:
                 grace_type = ""
-            note_info += (is_grace, grace_type)
+
+            
+            note_info += (is_grace, grace_type, steal_proportion, local_grace_order, is_grace_chord, doc_order)
+            if not include_staff:
+                 staff = note.staff if note.staff is not None else 0
+                 note_info += (staff,)
+
 
         if key_signature_map is not None:
             fifths, mode = key_signature_map(note.start.t)
@@ -2552,6 +2591,7 @@ def note_array_from_note_list(
 
         if divs_per_quarter:
             note_info += (divs_per_quarter,)
+            
 
         note_array.append(note_info)
 
@@ -2572,6 +2612,39 @@ def note_array_from_note_list(
     note_array = note_array[pitch_sort_idx]
     onset_sort_idx = np.argsort(note_array[onset_unit], kind="mergesort")
     note_array = note_array[onset_sort_idx]
+
+    if include_grace_notes:
+        # Compute local grace order for each group of grace notes with the same onset time and voice.
+        unique_onsets = np.unique(note_array[onset_unit])
+        for onset in unique_onsets:
+            onset_array = note_array[note_array[onset_unit] == onset]
+            grace_onset_array = onset_array[onset_array["is_grace"] == 1]
+            if len(grace_onset_array) > 0:
+                unique_staffs = np.unique(grace_onset_array["staff"])
+                for staff in unique_staffs:
+                    staff_grace_onset_array = grace_onset_array[grace_onset_array["staff"] == staff]
+                    # sort by document order
+                    staff_grace_onset_array = staff_grace_onset_array[np.argsort(staff_grace_onset_array["doc_order"])]
+                    local_order_val = 0
+                    chord_flag = False
+                    for row in staff_grace_onset_array:
+                        nid = row["id"]
+                        row_idx = np.where((note_array["id"] == nid))[0]
+                        if note_array[row_idx]["is_grace_chord"] == True:
+                            chord_flag = True
+                        else:
+                            chord_flag = False
+                        note_array["local_grace_order"][row_idx] = local_order_val
+                        if chord_flag:
+                            continue
+                        else:
+                            local_order_val += 1
+            
+
+        note_array = np.lib.recfunctions.drop_fields(note_array, "is_grace_chord")
+        note_array = np.lib.recfunctions.drop_fields(note_array, "doc_order")
+        if not include_staff:
+            note_array = np.lib.recfunctions.drop_fields(note_array, "staff")
 
     return note_array
 
@@ -3561,6 +3634,228 @@ def segment_ppart_by_gap(
     )
 
     return list_pparts, start_end_times
+
+
+def ensure_grace_duration(
+        main_note_array: np.ndarray, 
+        grace_offset_quarter: float,
+        ) -> float:
+    '''
+    Ensure that the grace offset is less than the minimum duration of the main notes, 
+    otherwise reduce the grace offset by half until it is less than the minimum duration of the main notes.
+    The main notes are the non-grace notes that are immediately preceded by the grace notes, and that are on the same staff as the grace notes.
+    '''
+
+    if main_note_array is None or len(main_note_array) == 0:
+        return grace_offset_quarter
+    while main_note_array['duration_quarter'].min() <= grace_offset_quarter:
+        print("Warning: The minimum duration of the main note is less than or equal to the grace offset. Reducing the grace offset by half.")
+        grace_offset_quarter /= 2
+    return grace_offset_quarter
+
+
+def expand_grace_notes_from_local_grace_order(
+        score_part: Any,
+        grace_offset_quarter: float = 1/4,
+        **kwargs,
+        ) -> np.ndarray:
+    '''
+    Expand grace notes by time and duration in the score note array based on their local grace order.
+    If the grace notes have the 'acciaccatura' grace_type, then they expand backwards in time. 
+    If the grace notes have the 'appoggiatura' grace_type, then they expand forwards in time.
+    All the grace notes within an acciaccatura or appoggiatura group are given a cumulative duration of grace_offset_quarter, 
+    where a grace_offset_quarter value of 1/4 means a duration of a 16th note.
+    This means that if there are 2 grace notes in an acciaccatura group, then each grace note will have a duration of 1/8th of a quarter note, 
+    and the onset of the first grace note will be 1/2 of a quarter note before the main note, 
+    and the onset of the second grace note will be 1/4th of a quarter note before the main note.
+    These two notes will 'steal' the time from the previous non-grace note, which will have its duration reduced by 1/4 of a quarter note.
+    In the case of appoggiaturas, the first grace note will have an onset that is the same as the main note,
+    but the main note will have an onset that is 1/4th of a quarter note after the first grace note, 
+    and the second grace note will have an onset that is 1/8th of a quarter note after the first grace note.
+    
+    Parameters
+    ----------
+    score_part: Part
+        A Partitura Score Part object from which a note array is to be generated with expanded the grace notes.
+    grace_offset_quarter: float
+        The cumulative duration in quarter notes that the grace notes at a given onset and staff will have.
+
+    Returns
+    -------
+    score_note_array: np.ndarray
+        A note array with the grace notes expanded by time and duration based on their local grace order.
+    '''
+
+    score_note_array = score_part.note_array(include_staff=True, include_grace_notes=True, include_time_signature=True, include_divs_per_quarter=True, **kwargs)
+    unique_onsets = np.unique(score_note_array['onset_beat'])
+    min_onset = score_note_array['onset_beat'].min()
+    min_onset_previous = min_onset - grace_offset_quarter
+    unique_staffs = np.unique(score_note_array['staff'])
+    previous_onset_staff = {staff: min_onset_previous for staff in unique_staffs}
+
+    for onset in unique_onsets:
+        notes_at_onset = score_note_array[score_note_array['onset_beat'] == onset]
+        # check if there are any grace notes at this onset
+        grace_notes_at_onset = notes_at_onset[notes_at_onset['is_grace'] == True]
+        
+        if len(grace_notes_at_onset) > 0:
+            # get the grace_type of the grace notes at this onset
+            grace_types = set(grace_notes_at_onset['grace_type'])
+            for grace_type in grace_types:
+                grace_notes_at_onset_and_type = grace_notes_at_onset[grace_notes_at_onset['grace_type'] == grace_type]
+                # sort the grace notes at this onset and type by their local_grace_order in ascending order
+                grace_notes_at_onset_and_type = grace_notes_at_onset_and_type[np.argsort(grace_notes_at_onset_and_type['local_grace_order'])]
+               
+                staff_values_at_onset_and_type = np.unique(grace_notes_at_onset_and_type["staff"])
+                
+                for staff_value in staff_values_at_onset_and_type:
+                    grace_notes_at_onset_and_type_and_staff = grace_notes_at_onset_and_type[grace_notes_at_onset_and_type['staff'] == staff_value]
+                
+                    ts_beat_type = grace_notes_at_onset_and_type_and_staff[0]['ts_beat_type']
+                    if grace_type == "appoggiatura":
+                        # get the main non-grace note that is on the same staff as this type of grace note.
+                        # We assume that only one type of grace note can be present at a given onset and staff.
+                        non_grace_notes_at_onset_and_staff = notes_at_onset[(notes_at_onset['is_grace'] == False) & (notes_at_onset['staff'] == staff_value)]
+                        # ensure that the minimum duration of the main non-grace note is greater than the grace offset, otherwise we cannot expand the grace notes
+                        grace_offset_quarter = ensure_grace_duration(non_grace_notes_at_onset_and_staff, grace_offset_quarter)
+
+                        # the main non-grace notes' onset_beat will be delayed by grace_offset_quarter, and the grace notes will be placed before the main non-grace note
+                        # get the "id" values of the main non-grace notes at this onset and staff
+                        non_grace_note_ids = non_grace_notes_at_onset_and_staff['id']
+                        # update the values in the score_note_array for the main non-grace notes at this onset and staff given the id values
+                        for non_grace_note_id in non_grace_note_ids:
+                            score_note_array['onset_beat'][score_note_array['id'] == non_grace_note_id] += grace_offset_quarter * ts_beat_type/4
+                            score_note_array['duration_beat'][score_note_array['id'] == non_grace_note_id] -= grace_offset_quarter * ts_beat_type/4
+                            score_note_array['onset_quarter'][score_note_array['id'] == non_grace_note_id] += grace_offset_quarter
+                            score_note_array['duration_quarter'][score_note_array['id'] == non_grace_note_id] -= grace_offset_quarter
+                            score_note_array['onset_div'][score_note_array['id'] == non_grace_note_id] += (grace_offset_quarter * score_note_array['divs_pq'][score_note_array['id'] == non_grace_note_id]).astype(int)
+                            score_note_array['duration_div'][score_note_array['id'] == non_grace_note_id] -= (grace_offset_quarter * score_note_array['divs_pq'][score_note_array['id'] == non_grace_note_id]).astype(int)
+
+                        # appoggiaturas expand forwards in time
+                        if np.all(grace_notes_at_onset_and_type_and_staff['local_grace_order'] == 0):
+                            duration_per_appoggiatura = grace_offset_quarter
+                        else:
+                            num_of_appogiaturas = np.unique(grace_notes_at_onset_and_type_and_staff['local_grace_order']).shape[0]
+                            duration_per_appoggiatura = grace_offset_quarter / num_of_appogiaturas
+                        for row in grace_notes_at_onset_and_type_and_staff:
+                            # update the values in the score_note_array for this grace note given the id value
+                            score_note_array['onset_beat'][score_note_array['id'] == row['id']] = onset + duration_per_appoggiatura * row['local_grace_order'] * ts_beat_type/4
+                            score_note_array['duration_beat'][score_note_array['id'] == row['id']] += duration_per_appoggiatura * ts_beat_type/4
+                            score_note_array['onset_quarter'][score_note_array['id'] == row['id']] = onset + duration_per_appoggiatura * row['local_grace_order']
+                            score_note_array['duration_quarter'][score_note_array['id'] == row['id']] += duration_per_appoggiatura
+                            score_note_array['onset_div'][score_note_array['id'] == row['id']] = ((onset + duration_per_appoggiatura * row['local_grace_order']) * row['divs_pq']).astype(int)
+                            score_note_array['duration_div'][score_note_array['id'] == row['id']] += (duration_per_appoggiatura * row['divs_pq']).astype(int)
+
+                    else: # acciaccatura
+                        previous_non_grace_notes_at_staff_and_onset = score_note_array[
+                            (score_note_array['is_grace'] == False) & 
+                            (score_note_array['staff'] == staff_value) & 
+                            (score_note_array['onset_beat'] < onset) & 
+                            (score_note_array['onset_beat'] >= previous_onset_staff[staff_value])]
+                        
+                        # modify only the previous non-grace notes that have a note off that is greater than 
+                        # the onset of the current grace notes minus the grace offset.
+                        prev_valid_nids = []
+                        for row in previous_non_grace_notes_at_staff_and_onset:
+                            note_off = row['onset_beat'] + row['duration_beat']
+                            id_val = row['id']
+                            if note_off > onset - grace_offset_quarter * ts_beat_type/4:
+                                prev_valid_nids.append(id_val)
+                        previous_non_grace_notes_at_staff_and_onset = previous_non_grace_notes_at_staff_and_onset[np.isin(previous_non_grace_notes_at_staff_and_onset['id'], prev_valid_nids)]
+                        
+                        # ensure that the minimum duration of the previous main non-grace note is greater than the grace offset, otherwise we cannot expand the grace notes
+                        grace_offset_quarter = ensure_grace_duration(previous_non_grace_notes_at_staff_and_onset, grace_offset_quarter)
+
+                        # get the "id" values of the previous non grace notes on this staff
+                        previous_non_grace_note_ids = previous_non_grace_notes_at_staff_and_onset['id'] if previous_non_grace_notes_at_staff_and_onset is not None else None
+                        if previous_non_grace_note_ids is not None and len(previous_non_grace_note_ids) > 0:
+                            # the previous main non-grace notes' duration_beat will be reduced by grace_offset_quarter, and the grace notes will be placed after the previous main non-grace note
+                            for non_grace_note_id in previous_non_grace_note_ids:
+                                score_note_array['duration_beat'][score_note_array['id'] == non_grace_note_id] -= grace_offset_quarter * ts_beat_type/4
+                                score_note_array['duration_quarter'][score_note_array['id'] == non_grace_note_id] -= grace_offset_quarter
+                                score_note_array['duration_div'][score_note_array['id'] == non_grace_note_id] -= (grace_offset_quarter * score_note_array['divs_pq'][score_note_array['id'] == non_grace_note_id]).astype(int)
+
+                        # acciaccaturas expand backwards in time
+                        if np.all(grace_notes_at_onset_and_type_and_staff['local_grace_order'] == 0):
+                            duration_per_acciaccatura = grace_offset_quarter
+                        else:
+                            num_of_acciaccaturas = np.unique(grace_notes_at_onset_and_type_and_staff['local_grace_order']).shape[0]
+                            duration_per_acciaccatura = grace_offset_quarter / num_of_acciaccaturas
+                        prev_onset_beat = onset - grace_offset_quarter * ts_beat_type/4
+                        current_onset_quarter = grace_notes_at_onset_and_type_and_staff[0]['onset_quarter']
+                        prev_onset_quarter = current_onset_quarter - grace_offset_quarter
+                        current_onset_div = grace_notes_at_onset_and_type_and_staff[0]['onset_div']
+                        prev_onset_div = current_onset_div - (grace_offset_quarter * grace_notes_at_onset_and_type_and_staff[0]['divs_pq']).astype(int)
+                        for row in grace_notes_at_onset_and_type_and_staff:
+                            # update the values in the score_note_array for this grace note given the id value
+                            score_note_array['onset_beat'][score_note_array['id'] == row['id']] = prev_onset_beat + duration_per_acciaccatura * (row['local_grace_order']) * ts_beat_type/4
+                            score_note_array['duration_beat'][score_note_array['id'] == row['id']] += duration_per_acciaccatura * ts_beat_type/4
+                            score_note_array['onset_quarter'][score_note_array['id'] == row['id']] = prev_onset_quarter + duration_per_acciaccatura * (row['local_grace_order'])
+                            score_note_array['duration_quarter'][score_note_array['id'] == row['id']] += duration_per_acciaccatura
+                            score_note_array['onset_div'][score_note_array['id'] == row['id']] = ((prev_onset_div + duration_per_acciaccatura * (row['local_grace_order'])) * row['divs_pq']).astype(int)
+                            score_note_array['duration_div'][score_note_array['id'] == row['id']] += (duration_per_acciaccatura * row['divs_pq']).astype(int)
+
+        
+        # update the previous_non_grace_notes for this staff to be the current main non-grace notes at this onset and staff
+        for staff_val in previous_onset_staff.keys():
+            previous_onset_staff[staff_val] = onset
+
+    # sort the score_note_array by onset_beat and then by id
+    score_note_array = score_note_array[np.lexsort((score_note_array['id'], score_note_array['onset_beat']))]
+
+    return score_note_array
+
+
+def remove_double_notes_from_score_note_array(
+    score_note_array: np.ndarray,
+    choose_longer_note: bool = False,
+) -> np.ndarray:
+    '''
+    Remove double notes from the score note array. Double notes are defined as notes that have the same onset time and pitch.
+    Such notes are usually meant for visually indicating an overarching melody within a group of voices/notes.
+    These double notes need to be removed for various applications such as alignment of score and performance/rehearsal.
+    
+    IMPORTANT! The score note array must be generated with the 'include_grace_notes' parameter set to True 
+    in order for the double notes to be correctly identified and removed, 
+    since some of the double notes can be grace notes.
+    
+    Parameters
+    ----------
+    score_note_array: np.ndarray
+        A note array of the score from which double notes are to be removed.
+    choose_longer_note: bool
+        Whether to choose the longer note among the double notes to keep in the score note array.
+         If False, the shorter note will be kept. The default is False.
+
+    Returns
+    -------
+    score_note_array_no_double: np.ndarray
+        A note array of the score with the double notes removed.
+    '''
+
+    if 'is_grace' not in score_note_array.dtype.names:
+        raise ValueError("The score_note_array must have the 'is_grace' column in order to remove double notes correctly. Pass the 'include_grace_notes=True' argument when generating the score_note_array to include the 'is_grace' column.")
+    
+    # get the unique onsets in the score_note_array
+    unique_onsets = np.unique(score_note_array['onset_beat'])
+    score_note_array_no_double = score_note_array.copy()
+    for onset in unique_onsets:
+        notes_at_onset = score_note_array[score_note_array['onset_beat'] == onset]
+        unique_pitches_at_onset = np.unique(notes_at_onset['pitch'])
+        for pitch in unique_pitches_at_onset:
+            notes_at_onset_and_pitch = notes_at_onset[notes_at_onset['pitch'] == pitch]
+            non_grace_notes_at_onset_and_pitch = notes_at_onset_and_pitch[notes_at_onset_and_pitch['is_grace'] == False]
+            if len(non_grace_notes_at_onset_and_pitch) > 1:
+                if choose_longer_note:
+                    note_to_keep = non_grace_notes_at_onset_and_pitch[np.argmax(non_grace_notes_at_onset_and_pitch['duration_beat'])]
+                else:
+                    note_to_keep = non_grace_notes_at_onset_and_pitch[np.argmin(non_grace_notes_at_onset_and_pitch['duration_beat'])]
+                
+                notes_to_remove = non_grace_notes_at_onset_and_pitch[non_grace_notes_at_onset_and_pitch != note_to_keep]
+                for note_to_remove in notes_to_remove:
+                    score_note_array_no_double = score_note_array_no_double[score_note_array_no_double != note_to_remove]
+
+    return score_note_array_no_double
 
 
 if __name__ == "__main__":

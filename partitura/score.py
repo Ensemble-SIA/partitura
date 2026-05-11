@@ -2111,11 +2111,12 @@ class Note(GenericNote):
 
     """
 
-    def __init__(self, step, octave, alter=None, **kwargs):
+    def __init__(self, step, octave, alter=None, is_grace_chord=False, **kwargs):
         super().__init__(**kwargs)
         self.step = step.upper()
         self.octave = octave
         self.alter = alter
+        self.is_grace_chord = is_grace_chord
         self.beam = None
 
     def assign_beam(self, beam):
