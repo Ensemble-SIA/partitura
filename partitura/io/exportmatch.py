@@ -25,11 +25,16 @@ from partitura.io.matchlines_v1 import (
     MatchSnote,
     MatchNote,
     MatchSnoteNote,
+    MatchSnoteVirtualNote,
     MatchSnoteDeletion,
     MatchInsertionNote,
     MatchSustainPedal,
     MatchSoftPedal,
     MatchOrnamentNote,
+    #MatchVirtualSnote,
+    MatchVirtualPNote,
+    #MatchSection,
+    #MatchOmittedSection,
     LATEST_VERSION,
 )
 
@@ -75,6 +80,15 @@ def matchfile_from_alignment(
     tempo_indication: Optional[str] = None,
     diff_score_version_notes: Optional[list] = None,
     version: Version = LATEST_VERSION,
+    use_new_format: bool = False,  # New flag for new format
+    note_to_min_id: Optional[dict] = None,
+    unified_note_ids: Optional[dict] = None,
+    #virtual_snote_map: Optional[dict] = None,  # New: dict for virtual score notes
+    #virtual_pnote_map: Optional[dict] = None,  # New: dict for virtual perf notes
+    #sections: Optional[List[dict]] = None,  # New: list of section dicts
+    #omitted_sections: Optional[List[dict]] = None,  # New: list of omitted section dicts
+    #minimal_section_length: float = 1.0,  # New: min section length in beats
+    #pitch_error_threshold: bool = True,  # New: enable pitch error detection
     debug: bool = False,
 ) -> MatchFile:
     """
@@ -115,13 +129,30 @@ def matchfile_from_alignment(
         A list of score notes that reflect a special score version (e.g., original edition/Erstdruck, Editors note etc.)
     version: Version
         Version of the match file. For now only 1.0.0 is supported.
+    use_new_format : bool
+        If True, use the new Match format (Version 2.0.0) with virtual notes and sections.
+    virtual_snote_map : dict or None
+        Mapping for virtual score notes: {score_id: [(perf_id, attr_list), ...]}.
+    virtual_pnote_map : dict or None
+        Mapping for virtual performance notes: {perf_id: [score_id, ...]}.
+    sections : list of dict or None
+        List of sections: each dict with 'id', 'start_beats_unfolded', etc.
+    omitted_sections : list of dict or None
+        List of omitted sections.
+    minimal_section_length : float
+        Minimum length (in beats) for auto-detected sections.
+    pitch_error_threshold : bool
+        If True, detect and encode pitch errors as virtualSnotes.
     Returns
     -------
     matchfile : MatchFile
         An instance of `partitura.io.importmatch.MatchFile`.
     """
-    if version < Version(1, 0, 0):
-        raise ValueError("Version should >= 1.0.0")
+    if use_new_format:
+        version = Version(1, 1, 0)
+    else:
+        if version < Version(1, 0, 0):
+            raise ValueError("Version should >= 1.0.0")
 
     if not assume_part_unfolded:
         # unfold score according to alignment
@@ -180,8 +211,8 @@ def matchfile_from_alignment(
 
     # Measure map (which measure corresponds to which time point in divs)
     beat_map = spart.beat_map
-
-    ptime_to_stime_map, _ = get_time_maps_from_alignment(
+    
+    ptime_to_stime_map, _ = get_time_maps_from_alignment(#TODO: How much sense does that make for rehearsal?
         ppart_or_note_array=ppart.note_array(),
         spart_or_note_array=spart.note_array(),
         alignment=alignment,
@@ -277,7 +308,7 @@ def matchfile_from_alignment(
                         fifths=int(ksig.fifths),
                         mode=ksig.mode,
                         is_list=False,
-                        fmt="v1.0.0",
+                        fmt="v1.0.0",#f"v{version.major}.{version.minor}.{version.patch}",
                     ),
                     measure=int(mnum),
                     beat=beat + 1,
@@ -437,15 +468,103 @@ def matchfile_from_alignment(
         duplicate_idx = np.hstack(list(duplicates.values()))
         voice_overlap_note_ids = list(sna[duplicate_idx]["id"])
 
+    import pdb
+    pdb.set_trace()
+    ###############################
     for al_note in alignment:
         label = al_note["label"]
+        """score_id = al_note.get("score_id")
+        perf_id = al_note.get("performance_id")
+
+        if use_new_format:
+            # Handle repetitions: if score_id already matched, create virtualSnote
+            if label == "match" and score_id in matched_score_ids:
+                snote = score_info[score_id]
+                pnote = perf_info[perf_id]
+                attr_list = ["rehearsal_repetition"]  # Default; extend from virtual_snote_map if provided
+                if virtual_snote_map and score_id in virtual_snote_map:
+                    for pid, attrs in virtual_snote_map[score_id]:
+                        if pid == perf_id:
+                            attr_list = attrs
+                            break
+                virtual_snote_line = MatchVirtualSnote(
+                    version=version,
+                    anchor=score_id,
+                    attr_list=attr_list,
+                    note=pnote
+                )
+                virtual_snote_lines.append(virtual_snote_line)
+                sort_stime.append(snote_sort_info[score_id])
+                continue  # Skip standard match
+
+            # Handle pitch errors
+            if label == "match" and pitch_error_threshold:
+                snote = score_info[score_id]
+                pnote = perf_info[perf_id]
+                score_pitch = snote.octave * 12 + {'C':0,'D':2,'E':4,'F':5,'G':7,'A':9,'B':11}[snote.note_name] + snote.modifier
+                if score_pitch != pnote.midi_pitch:
+                    virtual_snote_line = MatchVirtualSnote(
+                        version=version,
+                        anchor=score_id,
+                        attr_list=["pitch_error"],
+                        note=pnote
+                    )
+                    virtual_snote_lines.append(virtual_snote_line)
+                    sort_stime.append(snote_sort_info[score_id])
+                    continue
+
+            # Handle virtualPnote for equivalent positions
+            if label == "match" and virtual_pnote_map and perf_id in virtual_pnote_map:
+                for sid in virtual_pnote_map[perf_id]:
+                    if sid != score_id:
+                        snote = score_info[sid]
+                        virtual_pnote_line = MatchVirtualPnote(
+                            version=version,
+                            snote=snote,
+                            note_id=perf_id
+                        )
+                        virtual_pnote_lines.append(virtual_pnote_line)
+                        sort_stime.append(snote_sort_info[sid])
+
+            # Track matched score_ids
+            if label == "match":
+                matched_score_ids[score_id].append(perf_id)
+
+            # Handle deletions of virtualSnotes (if score_id in repetition and deleted)
+            if label == "deletion" and score_id in matched_score_ids:
+                snote = score_info[score_id]
+                deletion_line = MatchSnoteDeletion(version=version, snote=snote)  # Reuse existing, or create virtual deletion
+                note_lines.append(deletion_line)
+                sort_stime.append(snote_sort_info[score_id])"""
 
         if label == "match":
-            snote = score_info[al_note["score_id"]]
+            snote = score_info[al_note["score_id"]] 
             pnote = perf_info[al_note["performance_id"]]
             snote_note_line = MatchSnoteNote(version=version, snote=snote, note=pnote)
             note_lines.append(snote_note_line)
             sort_stime.append(snote_sort_info[al_note["score_id"]])
+        
+
+            if use_new_format:
+                if al_note["score_id"] in unified_note_ids:
+                    min_id = note_to_min_id[al_note["score_id"]]
+                    duplicates = unified_note_ids[min_id].copy()
+                    duplicates.remove(al_note["score_id"])
+                    for sid in duplicates:
+                        snote = score_info[sid]
+                        #pdb.set_trace()
+                        virtualnote = MatchVirtualPNote(
+                                    version=version,
+                                    id=al_note["performance_id"],
+                                )
+                        snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
+                        note_lines.append(snote_virtualnote_line)
+                        sort_stime.append(snote_sort_info[al_note["score_id"]])
+                  
+
+            #TODO: check if there exist duplicates (i.e. the len(unified_note_ids[sid])>1): if yes -> assign virtual pnote to matching p_id
+            # then assign virtual pnote to all other snotes in the unified_note_ids[sid]
+
 
         elif label == "deletion":
             snote = score_info[al_note["score_id"]]
@@ -474,6 +593,36 @@ def matchfile_from_alignment(
 
             note_lines.append(ornament_line)
             sort_stime.append(pnote_sort_info[al_note["performance_id"]])
+
+    #############################################################################
+    """# New: Add section lines
+    if use_new_format:
+        for sec in sections or []:
+            section_line = MatchSection(
+                version=version,
+                id=sec['id'],
+                start_beats_unfolded=sec['start_beats_unfolded'],
+                end_beats_unfolded=sec['end_beats_unfolded'],
+                start_beats_original=sec['start_beats_original'],
+                end_beats_original=sec['end_beats_original'],
+                start_perf_time=sec['start_perf_time'],
+                end_perf_time=sec['end_perf_time'],
+                attributes_list=sec['attributes_list']
+            )
+            section_lines.append(section_line)
+
+        for osec in omitted_sections or []:
+            omitted_section_line = MatchOmittedSection(
+                version=version,
+                id=osec['id'],
+                start_beats_unfolded=osec['start_beats_unfolded'],
+                end_beats_unfolded=osec['end_beats_unfolded'],
+                start_beats_original=osec['start_beats_original'],
+                end_beats_original=osec['end_beats_original'],
+                attributes_list=osec['attributes_list']
+            )
+            omitted_section_lines.append(omitted_section_line)"""
+    #############################################################################
 
     # sort notes by score onset (performed insertions are sorted
     # according to the interpolation map
@@ -519,6 +668,7 @@ def matchfile_from_alignment(
             all_match_lines += scoreprop_lines[h]
 
     # Concatenate all lines
+    #all_match_lines += virtual_snote_lines + virtual_pnote_lines + section_lines + omitted_section_lines
     all_match_lines += list(note_lines) + pedal_lines
     matchfile = MatchFile(lines=all_match_lines)
     return matchfile
@@ -538,6 +688,15 @@ def save_match(
     score_filename: Optional[PathLike] = None,
     performance_filename: Optional[PathLike] = None,
     assume_unfolded: bool = True,
+    use_new_format: bool = False,  # New flag
+    note_to_min_id: Optional[dict] = None,
+    unified_note_ids: Optional[dict] = None,
+    #virtual_snote_map: Optional[dict] = None,  # New
+    #virtual_pnote_map: Optional[dict] = None,  # New
+    #sections: Optional[List[dict]] = None,  # New
+    #omitted_sections: Optional[List[dict]] = None,  # New
+    #minimal_section_length: float = 1.0,  # New
+    #pitch_error_threshold: bool = True,  # New
 ) -> Optional[MatchFile]:
     """
     Save an Alignment of a PerformedPart to a Part in a match file.
@@ -619,6 +778,15 @@ def save_match(
         score_filename=score_filename,
         performance_filename=performance_filename,
         assume_part_unfolded=assume_unfolded,
+        use_new_format=use_new_format,
+        note_to_min_id=note_to_min_id,
+        unified_note_ids=unified_note_ids,
+        #virtual_snote_map=virtual_snote_map,
+        #virtual_pnote_map=virtual_pnote_map,
+        #sections=sections,
+        #omitted_sections=omitted_sections,
+        #minimal_section_length=minimal_section_length,
+        #pitch_error_threshold=pitch_error_threshold,
     )
 
     if out is not None:

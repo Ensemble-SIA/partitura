@@ -27,7 +27,9 @@ from partitura.io.matchfile_base import (
     BasePtimeLine,
     BaseStimePtimeLine,
     BaseNoteLine,
+    VirtualNoteLine,
     BaseSnoteNoteLine,
+    BaseSnoteVirtualNoteLine,
     BaseDeletionLine,
     BaseInsertionLine,
     BaseOrnamentLine,
@@ -101,6 +103,8 @@ INFO_LINE = {
         "subtitle": (interpret_as_string, format_string, str),
     }
 }
+
+INFO_LINE[Version(1, 1, 0)] = INFO_LINE[Version(1, 0, 0)]
 
 INFO_ATTRIBUTE_EQUIVALENCES = dict(
     midiFilename="midiFileName",
@@ -250,6 +254,8 @@ SCOREPROP_LINE = {
         "directions": (interpret_as_list, format_list, list),
     }
 }
+
+SCOREPROP_LINE[Version(1, 1, 0)] = SCOREPROP_LINE[Version(1, 0, 0)]
 
 SCOREPROP_ATTRIBUTE_EQUIVALENCES = dict(
     beatSubdivision="beatSubDivision",
@@ -809,6 +815,8 @@ NOTE_LINE = {
     }
 }
 
+NOTE_LINE[Version(1, 1, 0)] = NOTE_LINE[Version(1, 0, 0)]
+
 
 class MatchNote(BaseNoteLine):
     field_names = (
@@ -917,6 +925,90 @@ class MatchNote(BaseNoteLine):
                 track=0,
             )
 
+###############################################################################################################################################
+class MatchVirtualPNote(VirtualNoteLine):
+    field_names = (
+        "Id",
+    )
+
+    out_pattern = (
+        "note({Id},)."
+    )
+
+    pattern = re.compile(
+        r"note\((?P<Id>[^,]+),"
+    )
+
+    def __init__(
+        self,
+        version: Version,
+        id: str,
+    ) -> None:
+        if version not in NOTE_LINE:
+            raise ValueError(
+                f"Unknown version {version}!. "
+                f"Supported versions are {list(NOTE_LINE.keys())}"
+            )
+
+        super().__init__(
+            version=version,
+            id=id,
+        )
+
+        self.field_types = tuple(NOTE_LINE[version][fn][2] for fn in self.field_names)
+        self.format_fun = dict(
+            [(fn, NOTE_LINE[version][fn][1]) for fn in self.field_names]
+        )
+
+    @classmethod
+    def from_matchline(
+        cls,
+        matchline: str,
+        pos: int = 0,
+        version: Version = LATEST_VERSION,
+    ) -> MatchNote:
+        if version < Version(1, 0, 0):
+            raise ValueError(f"{version} < Version(1, 0, 0)")
+
+        kwargs = get_kwargs_from_matchline(
+            matchline=matchline,
+            pattern=cls.pattern,
+            field_names=cls.field_names,
+            class_dict=NOTE_LINE[version],
+            pos=pos,
+        )
+
+        if kwargs is not None:
+            return cls(version=version, **kwargs)
+
+        else:
+            raise MatchError("Input match line does not fit the expected pattern.")
+
+    @classmethod
+    def from_instance(
+        cls,
+        instance: BaseNoteLine,
+        version: Version = LATEST_VERSION,
+    ) -> MatchNote:
+        if version < Version(1, 0, 0):
+            raise ValueError(f"{version} < Version(1, 0, 0)")
+
+        if not isinstance(instance, BaseNoteLine):
+            raise ValueError("`instance` needs to be a subclass of `BaseNoteLine`")
+
+        if instance.version < Version(1, 0, 0):
+            return cls(
+                version=version,
+                id=instance.Id,
+                midi_pitch=instance.MidiPitch,
+                onset=int(np.round(instance.Onset)),
+                offset=int(np.round(instance.Offset)),
+                velocity=instance.Velocity,
+                channel=1,
+                track=0,
+            )
+
+###############################################################################################################################################
 
 class MatchStimePtime(BaseStimePtimeLine):
     def __init__(
@@ -995,6 +1087,53 @@ class MatchSnoteNote(BaseSnoteNoteLine):
             version=version,
             snote=MatchSnote.from_instance(instance.snote, version=version),
             note=MatchNote.from_instance(instance.note, version=version),
+        )
+    
+class MatchSnoteVirtualNote(BaseSnoteVirtualNoteLine):
+    def __init__(
+        self,
+        version: Version,
+        snote: BaseSnoteLine,
+        note: VirtualNoteLine,
+    ) -> None:
+        super().__init__(
+            version=version,
+            snote=snote,
+            note=note,
+        )
+
+    @classmethod
+    def from_matchline(
+        cls,
+        matchline: str,
+        version: Version = LATEST_VERSION,
+    ) -> MatchSnoteVirtualNote:
+        if version < Version(1, 0, 0):
+            raise ValueError(f"{version} < Version(1, 0, 0)")
+
+        kwargs = cls.prepare_kwargs_from_matchline(
+            matchline=matchline,
+            snote_class=MatchSnote,
+            note_class=MatchVirtualPNote,
+            version=version,
+        )
+
+        return cls(**kwargs)
+
+    @classmethod
+    def from_instance(
+        cls, instance: BaseSnoteVirtualNoteLine, version: Version
+    ) -> MatchSnoteVirtualNote:
+        if version < Version(1, 0, 0):
+            raise ValueError(f"{version} < Version(1, 0, 0)")
+
+        if not isinstance(instance, BaseSnoteVirtualNoteLine):
+            raise ValueError("`instance` needs to be a subclass of `BaseSnoteVirtualNoteLine`")
+
+        return cls(
+            version=version,
+            snote=MatchSnote.from_instance(instance.snote, version=version),
+            note=MatchVirtualPNote.from_instance(instance.note, version=version),
         )
 
 
