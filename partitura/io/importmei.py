@@ -441,7 +441,7 @@ class MeiParser(object):
             Returns a partitura part filled with meter, time signature, key signature information.
         """
         # Fetch the namespace of the staff.
-        id = staffdef_el.attrib[self._ns_name("id", XML_NAMESPACE)]
+        id = staffdef_el.attrib.get(self._ns_name("id", XML_NAMESPACE), "")
         label_el = staffdef_el.find(self._ns_name("label"))
         name = label_el.text if label_el is not None else ""
         ppq_attrib = staffdef_el.get("ppq")
@@ -476,7 +476,7 @@ class MeiParser(object):
             group_symbol = group_symbol_el.attrib["symbol"]
         label_el = staffgroup_el.find(self._ns_name("label"))
         name = label_el.text if label_el is not None else None
-        id = staffgroup_el.attrib[self._ns_name("id", XML_NAMESPACE)]
+        id = staffgroup_el.attrib.get(self._ns_name("id", XML_NAMESPACE), "")
         staff_group = score.PartGroup(group_symbol, group_name=name, id=id)
         staves_el = staffgroup_el.findall(self._ns_name("staffDef"))
         for s_el in staves_el:
