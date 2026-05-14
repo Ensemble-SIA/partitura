@@ -1057,7 +1057,9 @@ class MeiParser(object):
     def _find_dir_positions(self, dir_el, bar_position):
         """Compute the position for a <dir> element.
         Returns an array, one position for each part."""
-        delta_position_beat = float(dir_el.get("tstamp"))
+        # If there is no tstamp element, assume that the direction is at the beginning
+        # of the measure.
+        delta_position_beat = float(dir_el.get("tstamp", 0.0))
         return [
             p.inv_beat_map(p.beat_map(bar_position) + delta_position_beat - 1)
             for p in score.iter_parts(self.parts)
