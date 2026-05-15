@@ -4,12 +4,21 @@
 This module contains methods for exporting MIDI files
 """
 
+import warnings
+
 import numpy as np
 
 from collections import defaultdict, OrderedDict
 from typing import Optional, Iterable
 
 from mido import MidiFile, MidiTrack, Message, MetaMessage, merge_tracks
+
+# SMF type-1 / type-0 headers store ticks-per-beat in a signed 16-bit field,
+# so the largest representable ppq is 32767. Without a cap, scores with many
+# coprime divisions (e.g., 3:2 and 5:4 and 7:6 tuplets in the same piece) make
+# np.lcm.reduce explode past this limit and crash mido at write time with
+# `struct.error: 'h' format requires -32768 <= number <= 32767`.
+SMF_MAX_PPQ = 32767
 
 import partitura.score as score
 from partitura.score import Score, Part, PartGroup, ScoreLike
@@ -74,10 +83,23 @@ def map_to_track_channel(note_keys, mode):
 
 
 def get_ppq(parts):
-    ppqs = np.concatenate(
-        [part.quarter_durations()[:, 1] for part in score.iter_parts(parts)]
-    )
-    ppq = np.lcm.reduce(ppqs)
+    arrays = [part.quarter_durations()[:, 1] for part in score.iter_parts(parts)]
+    if not arrays:
+        # Score has no parts (e.g., a MusicXML file with an empty <part-list/>).
+        # Caller is expected to bail out before writing notes; we just need a
+        # representable header value here so save_score_midi can produce a
+        # well-formed empty MIDI file rather than crashing in np.concatenate.
+        return 480
+    ppqs = np.concatenate(arrays)
+    ppq = int(np.lcm.reduce(ppqs))
+    if ppq > SMF_MAX_PPQ:
+        warnings.warn(
+            f"Computed ppq={ppq} exceeds the SMF 16-bit max ({SMF_MAX_PPQ}); "
+            f"capping. Tick positions for very-fine subdivisions may be rounded.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        ppq = SMF_MAX_PPQ
     return ppq
 
 
@@ -348,13 +370,23 @@ def save_score_midi(
     elif isinstance(score_data, (Part, PartGroup)):
         parts = [score_data]
     elif isinstance(score_data, Iterable):
-        parts = score_data
+        # Materialize so the empty-check below doesn't consume a generator
+        # that get_ppq / the main loop need to iterate again.
+        parts = list(score_data)
 
     else:
         raise ValueError(
             "`score_data` should be a `Score`, a `Part`, a `PartGroup"
             f" or a list of  `Part` instances but is {type(score_data)}"
         )
+
+    if not list(score.iter_parts(parts)):
+        raise ValueError(
+            "Cannot save to MIDI: the score has no parts. This usually "
+            "means the source MusicXML had an empty <part-list/> or no "
+            "<part> elements."
+        )
+
     ppq = get_ppq(parts)
     # double it until it is above the minimum level.
     # Doubling instead of setting it ensure that the common divisors stay the same.
