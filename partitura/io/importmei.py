@@ -32,6 +32,9 @@ import warnings
 
 import numpy as np
 
+# Pattern to catch endings for MEI files exported from MuseScore
+MSCORE_ENDING_PATTERN = re.compile(r'mscore-ending-(\d+)')
+
 
 @deprecated_alias(mei_path="filename")
 def load_mei(filename: PathLike) -> score.Score:
@@ -529,10 +532,14 @@ class MeiParser(object):
         elif note_el.find(self._ns_name("accid")) is not None:
             if note_el.find(self._ns_name("accid")).get("accid") is not None:
                 return SIGN_TO_ALTER[note_el.find(self._ns_name("accid")).get("accid")]
-            else:
+            elif note_el.find(self._ns_name("accid")).get("accid.ges") is not None:
                 return SIGN_TO_ALTER[
-                    note_el.find(self._ns_name("accid")).get("accid.ges")
-                ]
+                        note_el.find(self._ns_name("accid")).get("accid.ges")
+                    ]
+            else:
+                # In case of an empty accid element
+                # e.g., <accid xml:id="g19n7p5l" />, appearing sometimes in pieces in C major
+                return None
         else:
             return None
 
@@ -1172,8 +1179,21 @@ class MeiParser(object):
                 position, measure_number = self._handle_section(
                     element, parts, position, measure_number
                 )
-                # insert the ending element
-                ending_number = int(re.sub("[^0-9]", "", element.attrib["n"]))
+
+                # check for MuseScore ending types
+                msending_match = MSCORE_ENDING_PATTERN.search(element.attrib.get("type", ""))
+
+                if msending_match:
+                    # Cast as string, since score.Ending expects a string. 
+                    # See self._add_ending below. Using integers causes issues unfolding scores
+                    ending_number = str(msending_match.group(1))
+                else:
+                    # NOTE: I'm not sure if all other endings should have "n". 
+                    # I would propose to replace element.attrib["n"] with element.attrib.get("n", "1")
+                    # but I'm not sure if this could cause unexpected behavior, so I'm leaving things
+                    # as they are.
+                    ending_number = str(re.sub("[^0-9]", "", element.attrib["n"]))
+
                 self._add_ending(ending_start, position, ending_number, parts)
             # explicit repetition expansions
             elif element.tag == self._ns_name("expansion"):
