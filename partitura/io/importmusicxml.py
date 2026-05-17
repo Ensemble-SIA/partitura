@@ -13,6 +13,7 @@ import zipfile
 from typing import Union, Optional, List
 import numpy as np
 from lxml import etree
+from collections import defaultdict
 
 # lxml does XSD validation too but has problems with the MusicXML 3.1 XSD, so we use
 # the xmlschema package for validating MusicXML against the definition
@@ -387,6 +388,7 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
 
         position = 0
         ongoing = {}
+        ongoing["tie_notes"] = defaultdict(dict)
         doc_order = 0
         # add new page and system at start of part
         _handle_new_page(position, part, ongoing)
@@ -403,6 +405,22 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
                 ignore_invisible_objects,
             )
 
+        # add collected ties
+        if len(ongoing["tie_notes"]["pitches"].keys()) > 0:
+            pitches_to_check = set(ongoing["tie_notes"]["pitches"].keys())
+            for pitch_to_check in pitches_to_check:
+
+                starting_tie_dict = ongoing["tie_notes"][("start", pitch_to_check)]
+                stopping_tie_dict = ongoing["tie_notes"][("stop", pitch_to_check)]
+
+                for tie_timepoint in starting_tie_dict.keys():
+                    if tie_timepoint in stopping_tie_dict:
+                        start_note = starting_tie_dict[tie_timepoint]
+                        stop_note = stopping_tie_dict[tie_timepoint]
+                        stop_note.tie_prev = start_note
+                        start_note.tie_next = stop_note
+        del ongoing["tie_notes"]
+                
         # complete unfinished endings
         for o in part.iter_all(score.Ending, mode="ending"):
             if o.start is None:
@@ -1490,19 +1508,16 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
 
     ties = e.findall("tie")
     if len(ties) > 0:
-        tie_key = ("tie", getattr(note, "midi_pitch", "rest"))
         tie_types = set(tie.attrib["type"] for tie in ties)
+        tie_pitch = getattr(note, "midi_pitch", "rest")
+        # roundabout way of collecting the pitches
+        ongoing["tie_notes"]["pitches"][tie_pitch] = None
 
         if "stop" in tie_types:
-            tie_prev = ongoing.get(tie_key, None)
-
-            if tie_prev:
-                note.tie_prev = tie_prev
-                tie_prev.tie_next = note
-                del ongoing[tie_key]
+            ongoing["tie_notes"][("stop",tie_pitch)][position] = note
 
         if "start" in tie_types:
-            ongoing[tie_key] = note
+            ongoing["tie_notes"][("start",tie_pitch)][position + duration] = note
 
     notations = e.find("notations")
 
