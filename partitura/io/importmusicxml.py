@@ -420,7 +420,7 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
                         stop_note.tie_prev = start_note
                         start_note.tie_next = stop_note
         del ongoing["tie_notes"]
-                
+
         # complete unfinished endings
         for o in part.iter_all(score.Ending, mode="ending"):
             if o.start is None:
@@ -1514,10 +1514,10 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
         ongoing["tie_notes"]["pitches"][tie_pitch] = None
 
         if "stop" in tie_types:
-            ongoing["tie_notes"][("stop",tie_pitch)][position] = note
+            ongoing["tie_notes"][("stop", tie_pitch)][position] = note
 
         if "start" in tie_types:
-            ongoing["tie_notes"][("start",tie_pitch)][position + duration] = note
+            ongoing["tie_notes"][("start", tie_pitch)][position + duration] = note
 
     notations = e.find("notations")
 
