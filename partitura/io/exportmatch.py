@@ -537,7 +537,7 @@ def save_match(
     piece: Optional[str] = None,
     score_filename: Optional[PathLike] = None,
     performance_filename: Optional[PathLike] = None,
-    assume_unfolded: bool = False,
+    assume_unfolded: bool = True,
 ) -> Optional[MatchFile]:
     """
     Save an Alignment of a PerformedPart to a Part in a match file.

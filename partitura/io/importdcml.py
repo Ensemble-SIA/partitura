@@ -4,11 +4,11 @@ from math import ceil
 import partitura.score as spt
 from partitura.score import process_local_key
 from partitura.utils.music import estimate_symbolic_duration
-from pandas.api.types import is_object_dtype
-from pandas.api.types import is_string_dtype
 
 try:
     import pandas as pd
+    from pandas.api.types import is_object_dtype
+    from pandas.api.types import is_string_dtype
 except ImportError:
     pd = None
 

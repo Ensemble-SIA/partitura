@@ -162,7 +162,7 @@ class MeiParser(object):
 
         if use_verovio:
             tk = verovio.toolkit(True)
-            tk.loadFile(mei_path)
+            tk.loadFile(str(mei_path))
             mei_score = tk.getMEI("basic")
             # document = etree.parse(mei_score, parser)
             root = etree.fromstring(mei_score.encode("utf-8"), parser)
@@ -405,7 +405,14 @@ class MeiParser(object):
             # there is at least one element with both dur and dur.ppq
             for dur, dppq in zip(durs, durs_ppq):
                 if dppq is not None:
-                    return dppq * dur / 4
+                    # Compute ppq using integer arithmetic to ensure a sensible integer
+                    candidate_ppq = dppq * dur
+                    if candidate_ppq % 4 == 0:
+                        ppq = candidate_ppq // 4
+                    else:
+                        ppq = int(round(candidate_ppq / 4))
+                    # Guard against non-positive or zero values
+                    return max(ppq, 1)
         else:
             # compute the ppq from the durations
             # add 4 to be sure to not go under 1 ppq
@@ -414,9 +421,10 @@ class MeiParser(object):
             # remove elements smaller than 1
             durs = durs[durs >= 1]
 
-            least_common_multiple = np.lcm.reduce(durs.astype(int))
-
-            return least_common_multiple / 4
+            least_common_multiple = int(np.lcm.reduce(durs.astype(int)))
+            # Since 4 is included in durs, least_common_multiple is divisible by 4
+            ppq = least_common_multiple // 4
+            return max(ppq, 1)
 
     def _handle_initial_staffdef(self, staffdef_el):
         """
@@ -589,7 +597,21 @@ class MeiParser(object):
         symbolic_duration :
         """
         # symbolic duration
-        symbolic_duration = self._get_symbolic_duration(el)
+
+        if el.get("sameas") is not None:
+            ref_id = el.get("sameas")
+            ref_id = ref_id.lstrip("#")
+            root = self.document.getroot()
+            found_element = root.xpath(
+                f"//*[@xml:id='{ref_id}']", namespaces={"xml": self.ns}
+            )
+            if found_element is not None:
+                symbolic_duration = self._get_symbolic_duration(found_element[0])
+            else:
+                symbolic_duration = 0
+
+        else:
+            symbolic_duration = self._get_symbolic_duration(el)
 
         # duration in ppq
         if el.get("dur.ppq") is not None or el.get("grace") is not None:
