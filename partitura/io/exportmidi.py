@@ -83,14 +83,9 @@ def map_to_track_channel(note_keys, mode):
 
 
 def get_ppq(parts):
-    arrays = [part.quarter_durations()[:, 1] for part in score.iter_parts(parts)]
-    if not arrays:
-        # Score has no parts (e.g., a MusicXML file with an empty <part-list/>).
-        # Caller is expected to bail out before writing notes; we just need a
-        # representable header value here so save_score_midi can produce a
-        # well-formed empty MIDI file rather than crashing in np.concatenate.
-        return 480
-    ppqs = np.concatenate(arrays)
+    ppqs = np.concatenate(
+        [part.quarter_durations()[:, 1] for part in score.iter_parts(parts)]
+    )
     ppq = int(np.lcm.reduce(ppqs))
     if ppq > SMF_MAX_PPQ:
         warnings.warn(

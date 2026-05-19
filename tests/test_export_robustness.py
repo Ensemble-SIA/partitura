@@ -109,6 +109,3 @@ class TestMusicXMLImportRobustness(unittest.TestCase):
                 f"expected a chord-without-prev warning, got {[str(i.message) for i in w]}",
             )
 
-
-if __name__ == "__main__":
-    unittest.main()
