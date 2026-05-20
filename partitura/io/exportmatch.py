@@ -217,9 +217,32 @@ def matchfile_from_alignment(
     measures = measures[measure_sorting_idx]
 
     start_measure_num = 0 if measure_starts_beats.min() < 0 else 1
+    seq_measure_nums = np.arange(start_measure_num, start_measure_num + len(measure_starts_divs))
+    
+    # parse native measure numbers
+    parsed_nums = []
+    for i, m in enumerate(measures):
+        mnum = seq_measure_nums[i]
+        if getattr(m, "number", None) is not None:
+            try:
+                mnum = int(m.number)
+            except (ValueError, TypeError):
+                pass
+        parsed_nums.append(mnum)
+
+    # global offset based on first measure:
+    # if anacrusis: first measure == 0 -> otherwise, 1_
+    expected_first_num = 0 if measure_starts_beats.min() < 0 else 1
+    
+    if len(parsed_nums) > 0:
+        offset = expected_first_num - parsed_nums[0]
+        actual_measure_nums = [n + offset for n in parsed_nums]
+    else:
+        actual_measure_nums = parsed_nums
+
     measure_starts = np.column_stack(
         (
-            np.arange(start_measure_num, start_measure_num + len(measure_starts_divs)),
+            actual_measure_nums,
             measure_starts_divs,
             measure_starts_beats,
         )
@@ -460,7 +483,6 @@ def matchfile_from_alignment(
 
     aligned_snotes, aligned_pnotes = [], []
     section_lines, omitted_section_lines = [], []
-    #pdb.set_trace()
     current_section_idx = -1
     ###############################
     #sort: # TODO: maybe sort before
@@ -473,7 +495,6 @@ def matchfile_from_alignment(
     #            sort_ptime.append(snote_sort_info[al_note["score_id"]])
         
     ###############################
-    pdb.set_trace()
     # TODO: why doesn't it sort before going through the for-loop?
     for al_note in alignment:
         label = al_note["label"]
@@ -632,8 +653,6 @@ def matchfile_from_alignment(
                 section_attr_list=osec['section_attr_list']
             )
             omitted_section_lines.append(omitted_section_line)
-    #############################################################################
-    #pdb.set_trace()
 
     # sort notes by score onset or by performance onset (for V1.1.0) 
     # (performed insertions are sorted
@@ -648,7 +667,6 @@ def matchfile_from_alignment(
         note_lines = np.array(note_lines)[sort_time_idx]
     
 
-    #pdb.set_trace()
     current_section_idx = -1
     line_idx = 0
     original_note_lines = note_lines.copy()
@@ -676,7 +694,6 @@ def matchfile_from_alignment(
                     current_section_idx += 1
                 line_idx += 1 # we iterated to the next line
     
-    #pdb.set_trace()
     # Create match lines for pedal information
     pedal_lines = []
     for c in ppart.controls:
