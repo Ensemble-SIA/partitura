@@ -5,8 +5,8 @@ This module contains methods for importing MIDI files.
 """
 
 import warnings
-
 from collections import defaultdict
+from contextlib import nullcontext
 from operator import itemgetter
 from typing import Union, Optional, List, Tuple, Dict
 import numpy as np
@@ -74,6 +74,7 @@ def load_performance_midi(
     filename: Union[PathLike, mido.MidiFile],
     default_bpm: Union[int, float] = 120,
     merge_tracks: bool = False,
+    quiet: bool = False,
 ) -> performance.Performance:
     """Load a musical performance from a MIDI file.
 
@@ -364,6 +365,7 @@ def load_score_midi(
     estimate_voice_info: bool = False,
     estimate_key: bool = False,
     assign_note_ids: bool = True,
+    quiet: bool = False,
 ) -> score.Score:
     """Load a musical score from a MIDI file and return it as a Part
     instance.
@@ -438,7 +440,15 @@ or a list of these
     .. [3] Krumhansl, Carol L. (1990) "Cognitive foundations of musical pitch",
            Oxford University Press, New York.
 
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
     """
+
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
 
     if isinstance(filename, mido.MidiFile):
         mid = filename

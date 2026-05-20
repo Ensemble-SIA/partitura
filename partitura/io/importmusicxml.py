@@ -5,6 +5,7 @@ This module contains methods for importing MusicXML files.
 """
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import warnings
@@ -199,6 +200,7 @@ def load_musicxml(
     validate: bool = False,
     force_note_ids: Optional[Union[bool, str]] = None,
     ignore_invisible_objects: bool = False,
+    quiet: bool = False,
 ) -> score.Score:
     """Parse a MusicXML file and build a composite score ontology
     structure from it (see also scoreontology.py).
@@ -220,6 +222,9 @@ def load_musicxml(
     ignore_invisible_objects : bool, optional
         When True, objects that with the attribute `print-object="no"`
         will be ignored. Defaults to False.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -227,6 +232,10 @@ def load_musicxml(
         A `Score` instance.
 
     """
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
     # NOTE: raising warning for ignore_invisible_objects is not ideal and it should be changed in the future
     if ignore_invisible_objects:
         warnings.warn(

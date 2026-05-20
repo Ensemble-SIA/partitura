@@ -5,9 +5,11 @@ This module contains methods for importing Humdrum Kern files.
 """
 
 import copy
-import re, sys
-import warnings
+import re
+import sys
+from contextlib import nullcontext
 from typing import Union, Optional
+import warnings
 import numpy as np
 from math import inf, ceil
 import partitura.score as spt
@@ -275,6 +277,7 @@ def load_kern(
     filename: PathLike,
     force_note_ids: Optional[Union[bool, str]] = None,
     force_same_part: Optional[bool] = False,
+    quiet: bool = False,
 ) -> spt.Score:
     """
     Parses an KERN file from path to Part.
@@ -285,11 +288,19 @@ def load_kern(
         The path of the KERN document.
     force_note_ids : (None, bool or "keep")
         When True each Note in the returned Part(s) will have a newly assigned unique id attribute.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
     Returns
     -------
     score : partitura.score.Score
         The score object containing the parts.
     """
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
+
     try:
         # Attempt to load the file using a faster parser that does not support spine splitting
         file = np.loadtxt(

@@ -1,4 +1,5 @@
 import warnings
+from contextlib import nullcontext
 import numpy as np
 from math import ceil
 import partitura.score as spt
@@ -319,7 +320,7 @@ def read_harmony_tsv(beat_tsv_path, part):
 
 
 def load_dcml(
-    note_tsv_path, measure_tsv_path=None, harmony_tsv_path=None, metadata=None
+    note_tsv_path, measure_tsv_path=None, harmony_tsv_path=None, metadata=None, quiet: bool = False
 ):
     """
     Load a score from tsv files containing the notes, measures and harmony annotations.
@@ -337,6 +338,9 @@ def load_dcml(
         Path to the tsv file containing the harmony annotations
     metadata: dict
         Metadata to add to the score. This is useful to add the composer, title, etc.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -344,6 +348,11 @@ def load_dcml(
         A `Score` instance.
 
     """
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
+
     if pd is None:
         raise ImportError("This functionality requires pandas to be installed")
 

@@ -5,6 +5,7 @@ This module contains methods for parsing matchfiles
 """
 
 import os
+from contextlib import nullcontext
 from typing import Union, Tuple, Optional, Callable, List
 import warnings
 from functools import partial
@@ -188,6 +189,7 @@ def load_match(
     pedal_threshold: int = 64,
     first_note_at_zero: bool = False,
     offset_duration_whole: bool = True,
+    quiet: bool = False,
 ) -> Tuple[Union[Performance, list, Score]]:
     """
     Load a matchfile.
@@ -211,6 +213,9 @@ def load_match(
         When true, the function expects the values to be given in whole
         notes (e.g. 1/4 for a quarter note) independet of time signature.
         Defaults to True.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -220,6 +225,11 @@ def load_match(
     scr : :class:partitura.score.Score
         The score. This item is only returned when `create_score` = True.
     """
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
+
     # Parse Matchfile
     mf = load_matchfile(filename)
 
