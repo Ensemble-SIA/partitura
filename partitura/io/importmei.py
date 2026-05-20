@@ -59,20 +59,20 @@ def load_mei(filename: PathLike, quiet: bool = False) -> score.Score:
     with ctx:
         if quiet:
             warnings.simplefilter("ignore")
-    parser = MeiParser(filename)
-    doc_name = get_document_name(filename)
-    # create parts from the specifications in the mei
-    parser.create_parts()
-    # fill parts with the content from the mei
-    parser.fill_parts()
+        parser = MeiParser(filename)
+        doc_name = get_document_name(filename)
+        # create parts from the specifications in the mei
+        parser.create_parts()
+        # fill parts with the content from the mei
+        parser.fill_parts()
 
-    # TODO: Parse score info (composer, lyricist, etc.)
-    scr = score.Score(
-        id=doc_name,
-        partlist=parser.parts,
-    )
+        # TODO: Parse score info (composer, lyricist, etc.)
+        scr = score.Score(
+            id=doc_name,
+            partlist=parser.parts,
+        )
 
-    return scr
+        return scr
 
 
 class MeiParser(object):

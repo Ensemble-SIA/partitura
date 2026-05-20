@@ -236,143 +236,143 @@ def load_musicxml(
     with ctx:
         if quiet:
             warnings.simplefilter("ignore")
-    # NOTE: raising warning for ignore_invisible_objects is not ideal and it should be changed in the future
-    if ignore_invisible_objects:
-        warnings.warn(
-            "Be advised that the 'ignore_invisible_objects' option might sometimes lead "
-            "to parsing errors for unusual musicxml files. \n"
-            "Note that when ignore_invisible_objects is False (the default), the parsing works as expected as before."
+        # NOTE: raising warning for ignore_invisible_objects is not ideal and it should be changed in the future
+        if ignore_invisible_objects:
+            warnings.warn(
+                "Be advised that the 'ignore_invisible_objects' option might sometimes lead "
+                "to parsing errors for unusual musicxml files. \n"
+                "Note that when ignore_invisible_objects is False (the default), the parsing works as expected as before."
+            )
+
+        xml = None
+        if isinstance(filename, (str, Path)):
+            if zipfile.is_zipfile(filename):
+                with zipfile.ZipFile(filename) as zipped_xml:
+                    with zipped_xml.open("META-INF/container.xml") as container:
+                        container_tree = etree.parse(container)
+                        contained_xml_name = container_tree.find(".//rootfile").get(
+                            "full-path"
+                        )
+                    xml = zipped_xml.open(contained_xml_name)
+
+        if xml is None:
+            xml = filename
+
+        if validate:
+            validate_musicxml(xml, debug=True)
+            # if xml is a file-like object we need to set the read pointer to the
+            # start of the file for parsing
+            if hasattr(xml, "seek"):
+                xml.seek(0)
+
+        parser = etree.XMLParser(
+            resolve_entities=False,
+            huge_tree=False,
+            remove_comments=True,
+            remove_blank_text=True,
+        )
+        document = etree.parse(xml, parser)
+
+        if document.getroot().tag != "score-partwise":
+            raise Exception("Currently only score-partwise structure is supported")
+
+        partlist_el = document.find("part-list")
+
+        if partlist_el is not None:
+            # parse the (hierarchical) structure of score parts
+            # (instruments) that are listed in the part-list element
+            partlist, part_dict = _parse_partlist(partlist_el)
+            # Go through each <part> to obtain the content of the parts.
+            # The Part instances will be modified in place
+            _parse_parts(
+                document, part_dict, ignore_invisible_objects=ignore_invisible_objects
+            )
+        else:
+            partlist = []
+
+        if force_note_ids is True or force_note_ids == "keep":
+            assign_note_ids(partlist, force_note_ids == "keep")
+
+        composer = None
+        scid = None
+        work_title = None
+        work_number = None
+        movement_title = None
+        movement_number = None
+        title = None
+        subtitle = None
+        lyricist = None
+        copyright = None
+
+        # The work tag is preferred for the title of the score, otherwise
+        # this method will search in the credit tags
+        work_info_el = document.find("work")
+
+        if work_info_el is not None:
+            scid = get_value_from_tag(
+                e=work_info_el,
+                tag="work-title",
+                as_type=str,
+            )
+            scidn = get_value_from_tag(
+                e=work_info_el,
+                tag="work-number",
+                as_type=str,
+            )
+            work_title = scid
+            work_number = scidn
+
+        movement_title_el = document.find(".//movement-title")
+        movement_number_el = document.find(".//movement-number")
+        if movement_title_el is not None:
+            movement_title = movement_title_el.text
+        if movement_number_el is not None:
+            movement_number = movement_number_el.text
+
+        score_identification_el = document.find("identification")
+
+        # The identification tag has preference over credit
+        if score_identification_el is not None:
+            copyright = get_value_from_tag(score_identification_el, "rights", str)
+
+            for cel in score_identification_el.findall("creator"):
+                if get_value_from_attribute(cel, "type", str) == "composer":
+                    composer = str(cel.text)
+                if get_value_from_attribute(cel, "type", str) == "lyricist":
+                    lyricist = str(cel.text)
+
+        for cel in document.findall("credit"):
+            credit_type = get_value_from_tag(cel, "credit-type", str)
+            if credit_type == "title" and title is None:
+                title = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "subtitle" and subtitle is None:
+                subtitle = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "composer" and composer is None:
+                composer = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "lyricist" and lyricist is None:
+                lyricist = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "rights" and copyright is None:
+                copyright = get_value_from_tag(cel, "credit-words", str)
+
+        scr = score.Score(
+            id=scid,
+            partlist=partlist,
+            work_number=work_number,
+            work_title=work_title,
+            movement_number=movement_number,
+            movement_title=movement_title,
+            title=title,
+            subtitle=subtitle,
+            composer=composer,
+            lyricist=lyricist,
+            copyright=copyright,
         )
 
-    xml = None
-    if isinstance(filename, (str, Path)):
-        if zipfile.is_zipfile(filename):
-            with zipfile.ZipFile(filename) as zipped_xml:
-                with zipped_xml.open("META-INF/container.xml") as container:
-                    container_tree = etree.parse(container)
-                    contained_xml_name = container_tree.find(".//rootfile").get(
-                        "full-path"
-                    )
-                xml = zipped_xml.open(contained_xml_name)
-
-    if xml is None:
-        xml = filename
-
-    if validate:
-        validate_musicxml(xml, debug=True)
-        # if xml is a file-like object we need to set the read pointer to the
-        # start of the file for parsing
-        if hasattr(xml, "seek"):
-            xml.seek(0)
-
-    parser = etree.XMLParser(
-        resolve_entities=False,
-        huge_tree=False,
-        remove_comments=True,
-        remove_blank_text=True,
-    )
-    document = etree.parse(xml, parser)
-
-    if document.getroot().tag != "score-partwise":
-        raise Exception("Currently only score-partwise structure is supported")
-
-    partlist_el = document.find("part-list")
-
-    if partlist_el is not None:
-        # parse the (hierarchical) structure of score parts
-        # (instruments) that are listed in the part-list element
-        partlist, part_dict = _parse_partlist(partlist_el)
-        # Go through each <part> to obtain the content of the parts.
-        # The Part instances will be modified in place
-        _parse_parts(
-            document, part_dict, ignore_invisible_objects=ignore_invisible_objects
-        )
-    else:
-        partlist = []
-
-    if force_note_ids is True or force_note_ids == "keep":
-        assign_note_ids(partlist, force_note_ids == "keep")
-
-    composer = None
-    scid = None
-    work_title = None
-    work_number = None
-    movement_title = None
-    movement_number = None
-    title = None
-    subtitle = None
-    lyricist = None
-    copyright = None
-
-    # The work tag is preferred for the title of the score, otherwise
-    # this method will search in the credit tags
-    work_info_el = document.find("work")
-
-    if work_info_el is not None:
-        scid = get_value_from_tag(
-            e=work_info_el,
-            tag="work-title",
-            as_type=str,
-        )
-        scidn = get_value_from_tag(
-            e=work_info_el,
-            tag="work-number",
-            as_type=str,
-        )
-        work_title = scid
-        work_number = scidn
-
-    movement_title_el = document.find(".//movement-title")
-    movement_number_el = document.find(".//movement-number")
-    if movement_title_el is not None:
-        movement_title = movement_title_el.text
-    if movement_number_el is not None:
-        movement_number = movement_number_el.text
-
-    score_identification_el = document.find("identification")
-
-    # The identification tag has preference over credit
-    if score_identification_el is not None:
-        copyright = get_value_from_tag(score_identification_el, "rights", str)
-
-        for cel in score_identification_el.findall("creator"):
-            if get_value_from_attribute(cel, "type", str) == "composer":
-                composer = str(cel.text)
-            if get_value_from_attribute(cel, "type", str) == "lyricist":
-                lyricist = str(cel.text)
-
-    for cel in document.findall("credit"):
-        credit_type = get_value_from_tag(cel, "credit-type", str)
-        if credit_type == "title" and title is None:
-            title = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "subtitle" and subtitle is None:
-            subtitle = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "composer" and composer is None:
-            composer = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "lyricist" and lyricist is None:
-            lyricist = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "rights" and copyright is None:
-            copyright = get_value_from_tag(cel, "credit-words", str)
-
-    scr = score.Score(
-        id=scid,
-        partlist=partlist,
-        work_number=work_number,
-        work_title=work_title,
-        movement_number=movement_number,
-        movement_title=movement_title,
-        title=title,
-        subtitle=subtitle,
-        composer=composer,
-        lyricist=lyricist,
-        copyright=copyright,
-    )
-
-    return scr
+        return scr
 
 
 def _parse_parts(document, part_dict, ignore_invisible_objects=False):

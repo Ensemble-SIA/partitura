@@ -145,46 +145,46 @@ or a list of these
         if quiet:
             warnings.simplefilter("ignore")
 
-    if filename.endswith(".mscz"):
-        pass
-    else:
-        # open the file as text and check if the first symbol is "<" to avoid
-        # further processing in case of non-XML files
-        with open(filename, "r") as f:
-            if f.read(1) != "<":
+        if filename.endswith(".mscz"):
+            pass
+        else:
+            # open the file as text and check if the first symbol is "<" to avoid
+            # further processing in case of non-XML files
+            with open(filename, "r") as f:
+                if f.read(1) != "<":
+                    raise FileImportException(
+                        "File {} is not a valid XML file.".format(filename)
+                    )
+
+        mscore_exec = find_musescore()
+
+        xml_fh = os.path.splitext(os.path.basename(filename))[0] + ".musicxml"
+
+        cmd = [mscore_exec, "-o", xml_fh, filename, "-f"]
+
+        try:
+            ps = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+            if ps.returncode != 0:
                 raise FileImportException(
-                    "File {} is not a valid XML file.".format(filename)
+                    (
+                        "Command {} failed with code {}. MuseScore " "error messages:\n {}"
+                    ).format(cmd, ps.returncode, ps.stderr.decode("UTF-8"))
                 )
-
-    mscore_exec = find_musescore()
-
-    xml_fh = os.path.splitext(os.path.basename(filename))[0] + ".musicxml"
-
-    cmd = [mscore_exec, "-o", xml_fh, filename, "-f"]
-
-    try:
-        ps = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-        if ps.returncode != 0:
+        except FileNotFoundError as f:
             raise FileImportException(
-                (
-                    "Command {} failed with code {}. MuseScore " "error messages:\n {}"
-                ).format(cmd, ps.returncode, ps.stderr.decode("UTF-8"))
+                'Executing "{}" returned  {}.'.format(" ".join(cmd), f)
             )
-    except FileNotFoundError as f:
-        raise FileImportException(
-            'Executing "{}" returned  {}.'.format(" ".join(cmd), f)
+
+        score = load_musicxml(
+            filename=xml_fh,
+            validate=validate,
+            force_note_ids=force_note_ids,
         )
 
-    score = load_musicxml(
-        filename=xml_fh,
-        validate=validate,
-        force_note_ids=force_note_ids,
-    )
+        os.remove(xml_fh)
 
-    os.remove(xml_fh)
-
-    return score
+        return score
 
 
 @deprecated_alias(out_fn="out", part="score_data")

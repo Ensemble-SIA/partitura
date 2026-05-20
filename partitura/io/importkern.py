@@ -301,161 +301,161 @@ def load_kern(
         if quiet:
             warnings.simplefilter("ignore")
 
-    try:
-        # Attempt to load the file using a faster parser that does not support spine splitting
-        file = np.loadtxt(
-            filename, dtype="U", delimiter="\t", comments="!!", encoding="cp437"
-        )
-        parsing_idxs = np.arange(file.shape[0])
-    except ValueError:
-        # Fallback to a slower parser that supports spine splitting
-        file, parsing_idxs = _handle_kern_with_spine_splitting(filename)
-
-    partlist = []
-    # Get the main number of parts and spline types
-    spline_types = file[0]
-
-    # Identify parsable parts that start with "**kern" or "**notes"
-    note_parts = np.char.startswith(spline_types, "**kern") | np.char.startswith(
-        spline_types, "**notes"
-    )
-    # Extract splines for the identified parts
-    splines = file[1:].T[note_parts]
-
-    has_instrument = np.char.startswith(splines, "*I")
-    # Determine if all parts have the same instrument
-    p_same_part = (
-        np.all(splines[has_instrument] == splines[has_instrument][0], axis=0)
-        if np.any(has_instrument)
-        else False
-    )
-    # Determine if all parts have the same *part
-    has_part_global = np.char.startswith(splines, "*part")
-    p_same_part = (
-        np.all(splines[has_part_global] == splines[has_part_global][0], axis=0)
-        if np.any(has_part_global)
-        else p_same_part
-    )
-    # Assign all splines to the same part if necessary
-    if p_same_part or force_same_part:
-        parsing_idxs[:] = 0
-
-    # Initialize lists to store parsed data
-    total_durations_list = []
-    elements_list = []
-    part_assignments = []
-    copy_partlist = []
-    doc_lines_per_spline = []
-    # Initialize staff and voice numbers
-    prev_staff = 1
-    pvoice = 1
-
-    # Iterate over each spline (musical data stream)
-    for j, spline in enumerate(splines):
-        # Create a new SplineParser for the current spline
-        parser = SplineParser(
-            size=spline.shape[-1],
-            id="P{}".format(parsing_idxs[j]),
-            staff=prev_staff,
-            voice=pvoice,
-        )
-        # Flag to indicate if the part is the same as a previous one
-        same_part = parser.id in [p.id for p in copy_partlist]
-        if same_part:
-            # If the part already exists, add to the previous part
-            warnings.warn(
-                "Part {} already exists. Adding to previous Part.".format(parser.id)
+        try:
+            # Attempt to load the file using a faster parser that does not support spine splitting
+            file = np.loadtxt(
+                filename, dtype="U", delimiter="\t", comments="!!", encoding="cp437"
             )
-            part = next(p for p in copy_partlist if p.id == parser.id)
-            # Check for staff information in the spline
-            has_staff = np.char.startswith(spline, "*staff")
-            staff = (
-                int(spline[has_staff][0][6:])
-                if np.count_nonzero(has_staff)
-                else prev_staff
+            parsing_idxs = np.arange(file.shape[0])
+        except ValueError:
+            # Fallback to a slower parser that supports spine splitting
+            file, parsing_idxs = _handle_kern_with_spine_splitting(filename)
+
+        partlist = []
+        # Get the main number of parts and spline types
+        spline_types = file[0]
+
+        # Identify parsable parts that start with "**kern" or "**notes"
+        note_parts = np.char.startswith(spline_types, "**kern") | np.char.startswith(
+            spline_types, "**notes"
+        )
+        # Extract splines for the identified parts
+        splines = file[1:].T[note_parts]
+
+        has_instrument = np.char.startswith(splines, "*I")
+        # Determine if all parts have the same instrument
+        p_same_part = (
+            np.all(splines[has_instrument] == splines[has_instrument][0], axis=0)
+            if np.any(has_instrument)
+            else False
+        )
+        # Determine if all parts have the same *part
+        has_part_global = np.char.startswith(splines, "*part")
+        p_same_part = (
+            np.all(splines[has_part_global] == splines[has_part_global][0], axis=0)
+            if np.any(has_part_global)
+            else p_same_part
+        )
+        # Assign all splines to the same part if necessary
+        if p_same_part or force_same_part:
+            parsing_idxs[:] = 0
+
+        # Initialize lists to store parsed data
+        total_durations_list = []
+        elements_list = []
+        part_assignments = []
+        copy_partlist = []
+        doc_lines_per_spline = []
+        # Initialize staff and voice numbers
+        prev_staff = 1
+        pvoice = 1
+
+        # Iterate over each spline (musical data stream)
+        for j, spline in enumerate(splines):
+            # Create a new SplineParser for the current spline
+            parser = SplineParser(
+                size=spline.shape[-1],
+                id="P{}".format(parsing_idxs[j]),
+                staff=prev_staff,
+                voice=pvoice,
             )
-            prev_staff = staff
-            if parser.staff != staff:
+            # Flag to indicate if the part is the same as a previous one
+            same_part = parser.id in [p.id for p in copy_partlist]
+            if same_part:
+                # If the part already exists, add to the previous part
+                warnings.warn(
+                    "Part {} already exists. Adding to previous Part.".format(parser.id)
+                )
+                part = next(p for p in copy_partlist if p.id == parser.id)
+                # Check for staff information in the spline
+                has_staff = np.char.startswith(spline, "*staff")
+                staff = (
+                    int(spline[has_staff][0][6:])
+                    if np.count_nonzero(has_staff)
+                    else prev_staff
+                )
+                prev_staff = staff
+                if parser.staff != staff:
+                    parser.staff = staff
+                # Update the voice number
+                parser.voice = pvoice + 1
+            else:
+                # If the part does not exist, create a new part
+                has_staff = np.char.startswith(spline, "*staff")
+                staff = int(spline[has_staff][0][6:]) if np.count_nonzero(has_staff) else 1
                 parser.staff = staff
-            # Update the voice number
-            parser.voice = pvoice + 1
-        else:
-            # If the part does not exist, create a new part
-            has_staff = np.char.startswith(spline, "*staff")
-            staff = int(spline[has_staff][0][6:]) if np.count_nonzero(has_staff) else 1
-            parser.staff = staff
-            prev_staff = staff
-            parser.voice = 1
-            pvoice = 1
+                prev_staff = staff
+                parser.voice = 1
+                pvoice = 1
 
-        # Parse the spline into musical elements
-        elements, lines = parser.parse(spline)
-        # Calculate unique durations and ensure they are integers
-        unique_durs = np.unique(parser.total_duration_values)
-        unique_durs = unique_durs[np.isfinite(unique_durs)]
-        d_mul = 2
-        while not np.all(np.isclose(unique_durs % 1, 0.0)):
-            unique_durs *= d_mul
-            d_mul += 1
-        unique_durs = unique_durs.astype(int)
-        divs_pq = np.lcm.reduce(unique_durs)
-        divs_pq = max(divs_pq, 4)
+            # Parse the spline into musical elements
+            elements, lines = parser.parse(spline)
+            # Calculate unique durations and ensure they are integers
+            unique_durs = np.unique(parser.total_duration_values)
+            unique_durs = unique_durs[np.isfinite(unique_durs)]
+            d_mul = 2
+            while not np.all(np.isclose(unique_durs % 1, 0.0)):
+                unique_durs *= d_mul
+                d_mul += 1
+            unique_durs = unique_durs.astype(int)
+            divs_pq = np.lcm.reduce(unique_durs)
+            divs_pq = max(divs_pq, 4)
 
-        if same_part:
-            divs_pq = np.lcm.reduce([divs_pq, part._quarter_durations[0]])
+            if same_part:
+                divs_pq = np.lcm.reduce([divs_pq, part._quarter_durations[0]])
+                part.set_quarter_duration(0, divs_pq)
+                pvoice = parser.voice
+            else:
+                part = spt.Part(
+                    id=parser.id, quarter_duration=divs_pq, part_name=parser.name
+                )
+
+            part_assignments.append(same_part)
+            doc_lines_per_spline.append(lines)
+            total_durations_list.append(parser.total_duration_values)
+            elements_list.append(elements)
+            copy_partlist.append(part)
+
+        # Ensure all parts have the same divs per quarter
+        divs_pq = np.lcm.reduce([p._quarter_durations[0] for p in copy_partlist])
+        for part in copy_partlist:
             part.set_quarter_duration(0, divs_pq)
-            pvoice = parser.voice
-        else:
-            part = spt.Part(
-                id=parser.id, quarter_duration=divs_pq, part_name=parser.name
+
+        line2pos = {}
+        for part, elements, total_duration_values, same_part, doc_lines in zip(
+            copy_partlist,
+            elements_list,
+            total_durations_list,
+            part_assignments,
+            doc_lines_per_spline,
+        ):
+            line2pos = element_parsing(
+                part, elements, total_duration_values, same_part, doc_lines, line2pos
             )
 
-        part_assignments.append(same_part)
-        doc_lines_per_spline.append(lines)
-        total_durations_list.append(parser.total_duration_values)
-        elements_list.append(elements)
-        copy_partlist.append(part)
+        for i, part in enumerate(copy_partlist):
+            if part_assignments[i]:
+                continue
+            # For all measures add end time as beginning time of next measure
+            measures = part.measures
+            for i in range(len(measures) - 1):
+                measures[i].end = measures[i + 1].start
+            measures[-1].end = part.last_point
+            # find and add pickup measure
+            if part.measures[0].start.t != 0:
+                part.add(spt.Measure(number=0), start=0, end=part.measures[0].start.t)
 
-    # Ensure all parts have the same divs per quarter
-    divs_pq = np.lcm.reduce([p._quarter_durations[0] for p in copy_partlist])
-    for part in copy_partlist:
-        part.set_quarter_duration(0, divs_pq)
+            if parser.id not in [p.id for p in partlist]:
+                partlist.append(part)
 
-    line2pos = {}
-    for part, elements, total_duration_values, same_part, doc_lines in zip(
-        copy_partlist,
-        elements_list,
-        total_durations_list,
-        part_assignments,
-        doc_lines_per_spline,
-    ):
-        line2pos = element_parsing(
-            part, elements, total_duration_values, same_part, doc_lines, line2pos
+        spt.assign_note_ids(
+            partlist, keep=(force_note_ids is True or force_note_ids == "keep")
         )
 
-    for i, part in enumerate(copy_partlist):
-        if part_assignments[i]:
-            continue
-        # For all measures add end time as beginning time of next measure
-        measures = part.measures
-        for i in range(len(measures) - 1):
-            measures[i].end = measures[i + 1].start
-        measures[-1].end = part.last_point
-        # find and add pickup measure
-        if part.measures[0].start.t != 0:
-            part.add(spt.Measure(number=0), start=0, end=part.measures[0].start.t)
-
-        if parser.id not in [p.id for p in partlist]:
-            partlist.append(part)
-
-    spt.assign_note_ids(
-        partlist, keep=(force_note_ids is True or force_note_ids == "keep")
-    )
-
-    doc_name = get_document_name(filename)
-    # Reverse the partlist to correct part order and visualization for exporting musicxml files
-    score = spt.Score(partlist=partlist[::-1], id=doc_name)
-    return score
+        doc_name = get_document_name(filename)
+        # Reverse the partlist to correct part order and visualization for exporting musicxml files
+        score = spt.Score(partlist=partlist[::-1], id=doc_name)
+        return score
 
 
 class SplineParser(object):

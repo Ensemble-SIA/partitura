@@ -348,20 +348,19 @@ def load_dcml(
         A `Score` instance.
 
     """
+    if pd is None:
+        raise ImportError("This functionality requires pandas to be installed")
     ctx = warnings.catch_warnings() if quiet else nullcontext()
     with ctx:
         if quiet:
             warnings.simplefilter("ignore")
 
-    if pd is None:
-        raise ImportError("This functionality requires pandas to be installed")
-
-    part = read_note_tsv(note_tsv_path, metadata=metadata)
-    if measure_tsv_path is not None:
-        read_measure_tsv(measure_tsv_path, part)
-    else:
-        spt.add_measures(part)
-    if harmony_tsv_path is not None:
-        read_harmony_tsv(harmony_tsv_path, part)
-    score = spt.Score([part])
-    return score
+        part = read_note_tsv(note_tsv_path, metadata=metadata)
+        if measure_tsv_path is not None:
+            read_measure_tsv(measure_tsv_path, part)
+        else:
+            spt.add_measures(part)
+        if harmony_tsv_path is not None:
+            read_harmony_tsv(harmony_tsv_path, part)
+        score = spt.Score([part])
+        return score

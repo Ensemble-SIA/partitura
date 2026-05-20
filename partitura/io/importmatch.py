@@ -230,30 +230,30 @@ def load_match(
         if quiet:
             warnings.simplefilter("ignore")
 
-    # Parse Matchfile
-    mf = load_matchfile(filename)
+        # Parse Matchfile
+        mf = load_matchfile(filename)
 
-    # Generate PerformedPart
-    ppart = performed_part_from_match(mf, pedal_threshold, first_note_at_zero)
+        # Generate PerformedPart
+        ppart = performed_part_from_match(mf, pedal_threshold, first_note_at_zero)
 
-    performance = Performance(
-        id=get_document_name(filename), performedparts=ppart, ensure_unique_tracks=False
-    )
-    # Generate Part
-    if create_score:
-        spart = part_from_matchfile(
-            mf,
-            match_offset_duration_in_whole=offset_duration_whole,
+        performance = Performance(
+            id=get_document_name(filename), performedparts=ppart, ensure_unique_tracks=False
         )
+        # Generate Part
+        if create_score:
+            spart = part_from_matchfile(
+                mf,
+                match_offset_duration_in_whole=offset_duration_whole,
+            )
 
-        scr = score.Score(id=get_document_name(filename), partlist=[spart])
-    # Alignment
-    alignment = alignment_from_matchfile(mf)
+            scr = score.Score(id=get_document_name(filename), partlist=[spart])
+        # Alignment
+        alignment = alignment_from_matchfile(mf)
 
-    if create_score:
-        return performance, alignment, scr
-    else:
-        return performance, alignment
+        if create_score:
+            return performance, alignment, scr
+        else:
+            return performance, alignment
 
 
 def note_alignment_from_matchfile(mf: MatchFile) -> List[dict]:
