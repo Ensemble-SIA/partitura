@@ -32,6 +32,9 @@ import warnings
 
 import numpy as np
 
+# Pattern to catch endings for MEI files exported from MuseScore
+MSCORE_ENDING_PATTERN = re.compile(r'mscore-ending-(\d+)')
+
 
 @deprecated_alias(mei_path="filename")
 def load_mei(filename: PathLike) -> score.Score:
@@ -441,7 +444,7 @@ class MeiParser(object):
             Returns a partitura part filled with meter, time signature, key signature information.
         """
         # Fetch the namespace of the staff.
-        id = staffdef_el.attrib[self._ns_name("id", XML_NAMESPACE)]
+        id = staffdef_el.attrib.get(self._ns_name("id", XML_NAMESPACE), "")
         label_el = staffdef_el.find(self._ns_name("label"))
         name = label_el.text if label_el is not None else ""
         ppq_attrib = staffdef_el.get("ppq")
@@ -476,7 +479,7 @@ class MeiParser(object):
             group_symbol = group_symbol_el.attrib["symbol"]
         label_el = staffgroup_el.find(self._ns_name("label"))
         name = label_el.text if label_el is not None else None
-        id = staffgroup_el.attrib[self._ns_name("id", XML_NAMESPACE)]
+        id = staffgroup_el.attrib.get(self._ns_name("id", XML_NAMESPACE), "")
         staff_group = score.PartGroup(group_symbol, group_name=name, id=id)
         staves_el = staffgroup_el.findall(self._ns_name("staffDef"))
         for s_el in staves_el:
@@ -529,10 +532,14 @@ class MeiParser(object):
         elif note_el.find(self._ns_name("accid")) is not None:
             if note_el.find(self._ns_name("accid")).get("accid") is not None:
                 return SIGN_TO_ALTER[note_el.find(self._ns_name("accid")).get("accid")]
-            else:
+            elif note_el.find(self._ns_name("accid")).get("accid.ges") is not None:
                 return SIGN_TO_ALTER[
-                    note_el.find(self._ns_name("accid")).get("accid.ges")
-                ]
+                        note_el.find(self._ns_name("accid")).get("accid.ges")
+                    ]
+            else:
+                # In case of an empty accid element
+                # e.g., <accid xml:id="g19n7p5l" />, appearing sometimes in pieces in C major
+                return None
         else:
             return None
 
@@ -1057,7 +1064,9 @@ class MeiParser(object):
     def _find_dir_positions(self, dir_el, bar_position):
         """Compute the position for a <dir> element.
         Returns an array, one position for each part."""
-        delta_position_beat = float(dir_el.get("tstamp"))
+        # If there is no tstamp element, assume that the direction is at the beginning
+        # of the measure.
+        delta_position_beat = float(dir_el.get("tstamp", 0.0))
         return [
             p.inv_beat_map(p.beat_map(bar_position) + delta_position_beat - 1)
             for p in score.iter_parts(self.parts)
@@ -1170,8 +1179,21 @@ class MeiParser(object):
                 position, measure_number = self._handle_section(
                     element, parts, position, measure_number
                 )
-                # insert the ending element
-                ending_number = int(re.sub("[^0-9]", "", element.attrib["n"]))
+
+                # check for MuseScore ending types
+                msending_match = MSCORE_ENDING_PATTERN.search(element.attrib.get("type", ""))
+
+                if msending_match:
+                    # Cast as string, since score.Ending expects a string. 
+                    # See self._add_ending below. Using integers causes issues unfolding scores
+                    ending_number = str(msending_match.group(1))
+                else:
+                    # NOTE: I'm not sure if all other endings should have "n". 
+                    # I would propose to replace element.attrib["n"] with element.attrib.get("n", "1")
+                    # but I'm not sure if this could cause unexpected behavior, so I'm leaving things
+                    # as they are.
+                    ending_number = str(re.sub("[^0-9]", "", element.attrib["n"]))
+
                 self._add_ending(ending_start, position, ending_number, parts)
             # explicit repetition expansions
             elif element.tag == self._ns_name("expansion"):
