@@ -33,7 +33,7 @@ import warnings
 import numpy as np
 
 # Pattern to catch endings for MEI files exported from MuseScore
-MSCORE_ENDING_PATTERN = re.compile(r'mscore-ending-(\d+)')
+MSCORE_ENDING_PATTERN = re.compile(r"mscore-ending-(\d+)")
 
 
 @deprecated_alias(mei_path="filename")
@@ -534,8 +534,8 @@ class MeiParser(object):
                 return SIGN_TO_ALTER[note_el.find(self._ns_name("accid")).get("accid")]
             elif note_el.find(self._ns_name("accid")).get("accid.ges") is not None:
                 return SIGN_TO_ALTER[
-                        note_el.find(self._ns_name("accid")).get("accid.ges")
-                    ]
+                    note_el.find(self._ns_name("accid")).get("accid.ges")
+                ]
             else:
                 # In case of an empty accid element
                 # e.g., <accid xml:id="g19n7p5l" />, appearing sometimes in pieces in C major
@@ -1181,14 +1181,16 @@ class MeiParser(object):
                 )
 
                 # check for MuseScore ending types
-                msending_match = MSCORE_ENDING_PATTERN.search(element.attrib.get("type", ""))
+                msending_match = MSCORE_ENDING_PATTERN.search(
+                    element.attrib.get("type", "")
+                )
 
                 if msending_match:
-                    # Cast as string, since score.Ending expects a string. 
+                    # Cast as string, since score.Ending expects a string.
                     # See self._add_ending below. Using integers causes issues unfolding scores
                     ending_number = str(msending_match.group(1))
                 else:
-                    # NOTE: I'm not sure if all other endings should have "n". 
+                    # NOTE: I'm not sure if all other endings should have "n".
                     # I would propose to replace element.attrib["n"] with element.attrib.get("n", "1")
                     # but I'm not sure if this could cause unexpected behavior, so I'm leaving things
                     # as they are.
