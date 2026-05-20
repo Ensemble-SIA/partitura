@@ -638,6 +638,90 @@ class BaseSnoteLine(MatchLine):
             raise MatchError("Input match line does not fit the expected pattern.")
 
 
+# deprecate bar for measure
+class VirtualSnoteLine(MatchLine):
+    """
+    Base class to represent score notes.
+
+    Parameters
+    ----------
+    version: Version
+    anchor: str
+    attributes_list: List[str]
+
+    Attributes
+    ----------
+
+    Notes
+    -----
+    """
+
+    # All derived classes should include
+    # at least these field names
+    field_names = (
+        "Anchor",
+        "AttributesList",
+    )
+
+    field_types = (
+        str,
+        list,
+    )
+
+    out_pattern = (
+        "virtualSnote({Anchor},{AttributesList})"
+    )
+
+    pattern = re.compile(
+        r"virtualSnote\("
+        r"(?P<Anchor>[^,]+),"
+        r"\[(?P<AttributesList>.*)\]\)"
+    )
+
+    format_fun = dict(
+        Anchor=format_string,
+        AttributesList=format_list,
+    )
+
+    def __init__(
+        self,
+        version: Version,
+        anchor: str,
+        attributes_list: List[str],
+    ) -> None:
+        super().__init__(version)
+
+        # All of these attributes should have the
+        # correct dtype (otherwise we need to be constantly
+        # checking the types).
+        self.Anchor = anchor
+        self.AttributesList = attributes_list
+
+    @classmethod
+    def prepare_kwargs_from_matchline(
+        cls,
+        matchline: str,
+        pos: int = 0,
+    ) -> Dict:
+        match_pattern = cls.pattern.search(matchline, pos)
+
+        if match_pattern is not None:
+            (
+                anchor_str,
+                attributes_list_str,
+            ) = match_pattern.groups()
+
+            anchor = interpret_as_string(anchor_str)
+
+            return dict(
+                anchor=interpret_as_string(anchor),
+                attributes_list=interpret_as_list(attributes_list_str),
+            )
+
+        else:
+            raise MatchError("Input match line does not fit the expected pattern.")
+        
+
 class BaseNoteLine(MatchLine):
     # All derived classes should include at least
     # these field names
@@ -861,6 +945,184 @@ class BaseSnoteVirtualNoteLine(MatchLine):
         cls,
         matchline: str,
         snote_class: BaseSnoteLine,
+        note_class: VirtualNoteLine,
+        version: Version,
+    ) -> Dict:
+        snote = snote_class.from_matchline(matchline, version=version)
+        note = note_class.from_matchline(matchline, version=version)
+
+        kwargs = dict(
+            version=version,
+            snote=snote,
+            note=note,
+        )
+
+        return kwargs
+    
+
+class VirtualSnoteNoteLine(MatchLine):
+    out_pattern = "{VirtualSnoteLine}-{NoteLine}"
+
+    def __init__(
+        self,
+        version: Version,
+        snote: VirtualSnoteLine,
+        note: BaseNoteLine,
+    ) -> None:
+        super().__init__(version)
+
+        self.snote = snote
+        self.note = note
+
+        self.field_names = self.snote.field_names + self.note.field_names
+
+        self.field_types = self.snote.field_types + self.note.field_types
+
+        self.pattern = (self.snote.pattern, self.note.pattern)
+
+        self.format_fun = (self.snote.format_fun, self.note.format_fun)
+
+    @property
+    def matchline(self) -> str:
+        return self.out_pattern.format(
+            VirtualSnoteLine=self.snote.matchline,
+            NoteLine=self.note.matchline,
+        )
+
+    def __str__(self) -> str:
+        """
+        Prints the printing the match line
+        """
+        r = [self.__class__.__name__]
+        r += [" Snote"] + [
+            "   {0}: {1}".format(fn, getattr(self.snote, fn, None))
+            for fn in self.snote.field_names
+        ]
+
+        r += [" Note"] + [
+            "   {0}: {1}".format(fn, getattr(self.note, fn, None))
+            for fn in self.note.field_names
+        ]
+
+        return "\n".join(r) + "\n"
+
+    def check_types(self, verbose: bool = False) -> bool:
+        """
+        Check whether the values of the fields are of the correct type.
+
+        Parameters
+        ----------
+        verbose : bool
+            Prints whether each of the attributes in field_names has the correct dtype.
+            values are
+
+        Returns
+        -------
+        types_are_correct : bool
+            True if the values of all fields in the match line have the
+            correct type.
+        """
+        snote_types_are_correct = self.snote.check_types(verbose)
+        note_types_are_correct = self.note.check_types(verbose)
+
+        types_are_correct = snote_types_are_correct and note_types_are_correct
+
+        return types_are_correct
+
+    @classmethod
+    def prepare_kwargs_from_matchline(
+        cls,
+        matchline: str,
+        snote_class: VirtualSnoteLine,
+        note_class: BaseNoteLine,
+        version: Version,
+    ) -> Dict:
+        snote = snote_class.from_matchline(matchline, version=version)
+        note = note_class.from_matchline(matchline, version=version)
+
+        kwargs = dict(
+            version=version,
+            snote=snote,
+            note=note,
+        )
+
+        return kwargs
+    
+
+class VirtualSnoteVirtualNoteLine(MatchLine):
+    out_pattern = "{VirtualSnoteLine}-{VirtualNoteLine}"
+
+    def __init__(
+        self,
+        version: Version,
+        snote: VirtualSnoteLine,
+        note: VirtualNoteLine,
+    ) -> None:
+        super().__init__(version)
+
+        self.snote = snote
+        self.note = note
+
+        self.field_names = self.snote.field_names + self.note.field_names
+
+        self.field_types = self.snote.field_types + self.note.field_types
+
+        self.pattern = (self.snote.pattern, self.note.pattern)
+
+        self.format_fun = (self.snote.format_fun, self.note.format_fun)
+
+    @property
+    def matchline(self) -> str:
+        return self.out_pattern.format(
+            VirtualSnoteLine=self.snote.matchline,
+            VirtualNoteLine=self.note.matchline,
+        )
+
+    def __str__(self) -> str:
+        """
+        Prints the printing the match line
+        """
+        r = [self.__class__.__name__]
+        r += [" Snote"] + [
+            "   {0}: {1}".format(fn, getattr(self.snote, fn, None))
+            for fn in self.snote.field_names
+        ]
+
+        r += [" Note"] + [
+            "   {0}: {1}".format(fn, getattr(self.note, fn, None))
+            for fn in self.note.field_names
+        ]
+
+        return "\n".join(r) + "\n"
+
+    def check_types(self, verbose: bool = False) -> bool:
+        """
+        Check whether the values of the fields are of the correct type.
+
+        Parameters
+        ----------
+        verbose : bool
+            Prints whether each of the attributes in field_names has the correct dtype.
+            values are
+
+        Returns
+        -------
+        types_are_correct : bool
+            True if the values of all fields in the match line have the
+            correct type.
+        """
+        snote_types_are_correct = self.snote.check_types(verbose)
+        note_types_are_correct = self.note.check_types(verbose)
+
+        types_are_correct = snote_types_are_correct and note_types_are_correct
+
+        return types_are_correct
+
+    @classmethod
+    def prepare_kwargs_from_matchline(
+        cls,
+        matchline: str,
+        snote_class: VirtualSnoteLine,
         note_class: VirtualNoteLine,
         version: Version,
     ) -> Dict:

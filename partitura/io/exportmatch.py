@@ -31,10 +31,12 @@ from partitura.io.matchlines_v1 import (
     MatchSustainPedal,
     MatchSoftPedal,
     MatchOrnamentNote,
-    #MatchVirtualSnote,
+    MatchVirtualSnote,
     MatchVirtualPNote,
-    #MatchSection,
-    #MatchOmittedSection,
+    MatchVirtualSnoteNote,
+    MatchVirtualSnoteVirtualNote,
+    MatchSection,
+    MatchOmittedSection,
     LATEST_VERSION,
 )
 
@@ -83,12 +85,8 @@ def matchfile_from_alignment(
     use_new_format: bool = False,  # New flag for new format
     note_to_min_id: Optional[dict] = None,
     unified_note_ids: Optional[dict] = None,
-    #virtual_snote_map: Optional[dict] = None,  # New: dict for virtual score notes
-    #virtual_pnote_map: Optional[dict] = None,  # New: dict for virtual perf notes
-    #sections: Optional[List[dict]] = None,  # New: list of section dicts
-    #omitted_sections: Optional[List[dict]] = None,  # New: list of omitted section dicts
-    #minimal_section_length: float = 1.0,  # New: min section length in beats
-    #pitch_error_threshold: bool = True,  # New: enable pitch error detection
+    sections: Optional[List[dict]] = [],  # New: list of section dicts
+    omitted_sections: Optional[List[dict]] = [],  # New: list of omitted section dicts
     debug: bool = False,
 ) -> MatchFile:
     """
@@ -451,7 +449,7 @@ def matchfile_from_alignment(
             pnote["midi_pitch"],
         )
 
-    sort_stime = []
+    sort_stime, sort_ptime = [], []
     note_lines = []
 
     # Get ids of notes which voice overlap
@@ -468,117 +466,136 @@ def matchfile_from_alignment(
         duplicate_idx = np.hstack(list(duplicates.values()))
         voice_overlap_note_ids = list(sna[duplicate_idx]["id"])
 
-    import pdb
-    pdb.set_trace()
+    aligned_snotes, aligned_pnotes = [], []
+    section_lines, omitted_section_lines = [], []
+    #pdb.set_trace()
+    current_section_idx = -1
     ###############################
+    #sort: # TODO: maybe sort before
+    #if use_new_format:
+    #    for al_note in alignment:
+    #        pid = al_note.get("performance_id", None)
+    #        if pid is not None:
+    #            sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+    #        else:
+    #            sort_ptime.append(snote_sort_info[al_note["score_id"]])
+        
+    ###############################
+    pdb.set_trace()
+    # TODO: why doesn't it sort before going through the for-loop?
     for al_note in alignment:
         label = al_note["label"]
-        """score_id = al_note.get("score_id")
-        perf_id = al_note.get("performance_id")
-
-        if use_new_format:
-            # Handle repetitions: if score_id already matched, create virtualSnote
-            if label == "match" and score_id in matched_score_ids:
-                snote = score_info[score_id]
-                pnote = perf_info[perf_id]
-                attr_list = ["rehearsal_repetition"]  # Default; extend from virtual_snote_map if provided
-                if virtual_snote_map and score_id in virtual_snote_map:
-                    for pid, attrs in virtual_snote_map[score_id]:
-                        if pid == perf_id:
-                            attr_list = attrs
-                            break
-                virtual_snote_line = MatchVirtualSnote(
-                    version=version,
-                    anchor=score_id,
-                    attr_list=attr_list,
-                    note=pnote
-                )
-                virtual_snote_lines.append(virtual_snote_line)
-                sort_stime.append(snote_sort_info[score_id])
-                continue  # Skip standard match
-
-            # Handle pitch errors
-            if label == "match" and pitch_error_threshold:
-                snote = score_info[score_id]
-                pnote = perf_info[perf_id]
-                score_pitch = snote.octave * 12 + {'C':0,'D':2,'E':4,'F':5,'G':7,'A':9,'B':11}[snote.note_name] + snote.modifier
-                if score_pitch != pnote.midi_pitch:
-                    virtual_snote_line = MatchVirtualSnote(
-                        version=version,
-                        anchor=score_id,
-                        attr_list=["pitch_error"],
-                        note=pnote
-                    )
-                    virtual_snote_lines.append(virtual_snote_line)
-                    sort_stime.append(snote_sort_info[score_id])
-                    continue
-
-            # Handle virtualPnote for equivalent positions
-            if label == "match" and virtual_pnote_map and perf_id in virtual_pnote_map:
-                for sid in virtual_pnote_map[perf_id]:
-                    if sid != score_id:
-                        snote = score_info[sid]
-                        virtual_pnote_line = MatchVirtualPnote(
-                            version=version,
-                            snote=snote,
-                            note_id=perf_id
-                        )
-                        virtual_pnote_lines.append(virtual_pnote_line)
-                        sort_stime.append(snote_sort_info[sid])
-
-            # Track matched score_ids
-            if label == "match":
-                matched_score_ids[score_id].append(perf_id)
-
-            # Handle deletions of virtualSnotes (if score_id in repetition and deleted)
-            if label == "deletion" and score_id in matched_score_ids:
-                snote = score_info[score_id]
-                deletion_line = MatchSnoteDeletion(version=version, snote=snote)  # Reuse existing, or create virtual deletion
-                note_lines.append(deletion_line)
-                sort_stime.append(snote_sort_info[score_id])"""
-
+        pid = al_note.get("performance_id", None)
         if label == "match":
-            snote = score_info[al_note["score_id"]] 
-            pnote = perf_info[al_note["performance_id"]]
-            snote_note_line = MatchSnoteNote(version=version, snote=snote, note=pnote)
-            note_lines.append(snote_note_line)
-            sort_stime.append(snote_sort_info[al_note["score_id"]])
-        
-
-            if use_new_format:
-                if al_note["score_id"] in unified_note_ids:
-                    min_id = note_to_min_id[al_note["score_id"]]
-                    duplicates = unified_note_ids[min_id].copy()
-                    duplicates.remove(al_note["score_id"])
-                    for sid in duplicates:
-                        snote = score_info[sid]
-                        #pdb.set_trace()
-                        virtualnote = MatchVirtualPNote(
+            if al_note["score_id"] not in aligned_snotes and al_note["performance_id"] not in aligned_pnotes: # always true when using old_format
+                # SNOTE - PNOTE
+                snote = score_info[al_note["score_id"]]
+                attributes_list = al_note.get("score_attributes_list", [])
+                snote.ScoreAttributesList += attributes_list
+                pnote = perf_info[al_note["performance_id"]]
+                snote_note_line = MatchSnoteNote(version=version, snote=snote, note=pnote)
+                note_lines.append(snote_note_line)
+                
+                if use_new_format:
+                    aligned_snotes.append(al_note["score_id"])
+                    aligned_pnotes.append(al_note["performance_id"])
+                    sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+                else:
+                    sort_stime.append(snote_sort_info[al_note["score_id"]])
+            elif al_note["score_id"] in aligned_snotes and al_note["performance_id"] not in aligned_pnotes:
+                # VIRTUAL_SNOTE - PNOTE
+                virtualSnote = MatchVirtualSnote(
+                                version=version,
+                                anchor=al_note["score_id"],
+                                attributes_list=al_note.get("score_attributes_list", []),
+                            )
+                pnote = perf_info[al_note["performance_id"]]
+                virtualSnote_note_line = MatchVirtualSnoteNote(version=version, snote=virtualSnote, note=pnote)
+                note_lines.append(virtualSnote_note_line)
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+                if use_new_format:
+                    aligned_pnotes.append(al_note["performance_id"])
+            elif al_note["score_id"] not in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
+                # SNOTE - VIRTUAL_PNOTE
+                snote = score_info[al_note["score_id"]]
+                virtualnote = MatchVirtualPNote(
                                     version=version,
                                     id=al_note["performance_id"],
                                 )
-                        snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
-                        note_lines.append(snote_virtualnote_line)
-                        sort_stime.append(snote_sort_info[al_note["score_id"]])
-                  
+                snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
+                note_lines.append(snote_virtualnote_line)
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+                if use_new_format:
+                    aligned_snotes.append(al_note["score_id"])
+            elif al_note["score_id"] in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
+                # VIRTUAL_SNOTE - VIRTUAL_PNOTE
+                virtualSnote = MatchVirtualSnote(
+                                version=version,
+                                anchor=al_note["score_id"],
+                                attributes_list=al_note.get("score_attributes_list", []),
+                            )
+                virtualnote = MatchVirtualPNote(
+                                    version=version,
+                                    id=al_note["performance_id"],
+                                )
+                virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(version=version, snote=virtualSnote, note=virtualnote)
+                note_lines.append(virtualSnote_virtualnote_line)
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
 
-            #TODO: check if there exist duplicates (i.e. the len(unified_note_ids[sid])>1): if yes -> assign virtual pnote to matching p_id
-            # then assign virtual pnote to all other snotes in the unified_note_ids[sid]
-
+            if use_new_format:
+                if al_note["score_id"] in unified_note_ids:
+                    # ALIGN ALL REPEATED SNOTES TO THE VIRTUAL_PNOTE
+                    min_id = note_to_min_id[al_note["score_id"]]
+                    duplicates = unified_note_ids[min_id].copy()
+                    duplicates.remove(al_note["score_id"])
+                    virtualnote = MatchVirtualPNote(
+                                    version=version,
+                                    id=al_note["performance_id"],
+                                )
+                    for sid in duplicates:
+                        if sid not in aligned_snotes:
+                            snote = score_info[sid]
+                            snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
+                            note_lines.append(snote_virtualnote_line)
+                            sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+                            aligned_snotes.append(sid)
+                        else:
+                            virtualSnote = MatchVirtualSnote(
+                                version=version,
+                                anchor=al_note["score_id"],
+                                attributes_list=al_note.get("score_attributes_list", []),
+                            )
+                            virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(version=version, snote=virtualSnote, note=virtualnote)
+                            note_lines.append(virtualSnote_virtualnote_line)
+                            sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
 
         elif label == "deletion":
+            skip_deletion = False
             snote = score_info[al_note["score_id"]]
-            if al_note["score_id"] in voice_overlap_note_ids:
-                snote.ScoreAttributesList.append("voice_overlap")
-            deletion_line = MatchSnoteDeletion(version=version, snote=snote)
-            note_lines.append(deletion_line)
-            sort_stime.append(snote_sort_info[al_note["score_id"]])
+            for om_sec in omitted_sections: # for old_format omitted_sections is empty list anyhow, so no problem
+                if snote.OnsetInBeats > om_sec["start_in_beats_unfolded"] and snote.OnsetInBeats < om_sec["end_in_beats_unfolded"]:
+                    # TODO: is the score beat time original or unfolded here? 
+                    skip_deletion = True
+                    break
+                
+            if not skip_deletion:
+                if al_note["score_id"] in voice_overlap_note_ids:
+                    snote.ScoreAttributesList.append("voice_overlap")
+                deletion_line = MatchSnoteDeletion(version=version, snote=snote)
+                note_lines.append(deletion_line)
+                if use_new_format:
+                    sort_ptime.append(snote_sort_info[al_note["score_id"]])
+                else:
+                    sort_stime.append(snote_sort_info[al_note["score_id"]])
 
         elif label == "insertion":
             note = perf_info[al_note["performance_id"]]
             insertion_line = MatchInsertionNote(version=version, note=note)
             note_lines.append(insertion_line)
-            sort_stime.append(pnote_sort_info[al_note["performance_id"]])
+            if use_new_format:
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+            else:
+                sort_stime.append(pnote_sort_info[al_note["performance_id"]])
 
         elif label == "ornament":
             ornament_type = al_note["type"]
@@ -592,22 +609,23 @@ def matchfile_from_alignment(
             )
 
             note_lines.append(ornament_line)
-            sort_stime.append(pnote_sort_info[al_note["performance_id"]])
+            if use_new_format:
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+            else:
+                sort_stime.append(pnote_sort_info[al_note["performance_id"]])
 
-    #############################################################################
-    """# New: Add section lines
     if use_new_format:
         for sec in sections or []:
             section_line = MatchSection(
                 version=version,
                 id=sec['id'],
-                start_beats_unfolded=sec['start_beats_unfolded'],
-                end_beats_unfolded=sec['end_beats_unfolded'],
-                start_beats_original=sec['start_beats_original'],
-                end_beats_original=sec['end_beats_original'],
-                start_perf_time=sec['start_perf_time'],
-                end_perf_time=sec['end_perf_time'],
-                attributes_list=sec['attributes_list']
+                start_in_beats_unfolded=sec['start_in_beats_unfolded'],
+                end_in_beats_unfolded=sec['end_in_beats_unfolded'],
+                start_in_beats_original=sec['start_in_beats_original'],
+                end_in_beats_original=sec['end_in_beats_original'],
+                start_in_perf_time=sec['start_in_perf_time'],
+                end_in_perf_time=sec['end_in_perf_time'],
+                section_attr_list=sec['section_attr_list']
             )
             section_lines.append(section_line)
 
@@ -615,21 +633,58 @@ def matchfile_from_alignment(
             omitted_section_line = MatchOmittedSection(
                 version=version,
                 id=osec['id'],
-                start_beats_unfolded=osec['start_beats_unfolded'],
-                end_beats_unfolded=osec['end_beats_unfolded'],
-                start_beats_original=osec['start_beats_original'],
-                end_beats_original=osec['end_beats_original'],
-                attributes_list=osec['attributes_list']
+                start_in_beats_unfolded=osec['start_in_beats_unfolded'],
+                end_in_beats_unfolded=osec['end_in_beats_unfolded'],
+                start_in_beats_original=osec['start_in_beats_original'],
+                end_in_beats_original=osec['end_in_beats_original'],
+                section_attr_list=osec['section_attr_list']
             )
-            omitted_section_lines.append(omitted_section_line)"""
+            omitted_section_lines.append(omitted_section_line)
     #############################################################################
+    #pdb.set_trace()
 
-    # sort notes by score onset (performed insertions are sorted
+    # sort notes by score onset or by performance onset (for V1.1.0) 
+    # (performed insertions are sorted
     # according to the interpolation map
-    sort_stime = np.array(sort_stime)
-    sort_stime_idx = np.lexsort((sort_stime[:, 1], sort_stime[:, 0]))
-    note_lines = np.array(note_lines)[sort_stime_idx]
+    if use_new_format:
+        sort_time = np.array(sort_ptime) #TODO: i assume the alignment to be sorted according to ptime rn
+        #note_lines = np.array(note_lines)
+    else:
+        sort_time = np.array(sort_stime)
+        
+        sort_time_idx = np.lexsort((sort_time[:, 1], sort_time[:, 0]))  
+        note_lines = np.array(note_lines)[sort_time_idx]
+    
 
+    #pdb.set_trace()
+    current_section_idx = -1
+    line_idx = 0
+    original_note_lines = note_lines.copy()
+
+    for note_line in original_note_lines:
+        if current_section_idx + 1 == len(sections): 
+            break
+        sec = sections[current_section_idx+1]
+        if hasattr(note_line, 'note'):
+            if hasattr(note_line.note, 'Onset'):
+                if note_line.note.Onset == sec["start_in_perf_time"]:
+                    section_line = MatchSection(
+                                        version=version,
+                                        id=sec['id'],
+                                        start_in_beats_unfolded=sec['start_in_beats_unfolded'],
+                                        end_in_beats_unfolded=sec['end_in_beats_unfolded'],
+                                        start_in_beats_original=sec['start_in_beats_original'],
+                                        end_in_beats_original=sec['end_in_beats_original'],
+                                        start_in_perf_time=sec['start_in_perf_time'],
+                                        end_in_perf_time=sec['end_in_perf_time'],
+                                        section_attr_list=sec['section_attr_list']
+                                        )
+                    note_lines = np.insert(note_lines, line_idx, section_line)
+                    line_idx += 1 # note_lines just got one line longer
+                    current_section_idx += 1
+                line_idx += 1 # we iterated to the next line
+    
+    #pdb.set_trace()
     # Create match lines for pedal information
     pedal_lines = []
     for c in ppart.controls:
@@ -669,6 +724,8 @@ def matchfile_from_alignment(
 
     # Concatenate all lines
     #all_match_lines += virtual_snote_lines + virtual_pnote_lines + section_lines + omitted_section_lines
+    #all_match_lines += section_lines 
+    all_match_lines += omitted_section_lines
     all_match_lines += list(note_lines) + pedal_lines
     matchfile = MatchFile(lines=all_match_lines)
     return matchfile
@@ -693,8 +750,8 @@ def save_match(
     unified_note_ids: Optional[dict] = None,
     #virtual_snote_map: Optional[dict] = None,  # New
     #virtual_pnote_map: Optional[dict] = None,  # New
-    #sections: Optional[List[dict]] = None,  # New
-    #omitted_sections: Optional[List[dict]] = None,  # New
+    sections: Optional[List[dict]] = [],  # New
+    omitted_sections: Optional[List[dict]] = [],  # New
     #minimal_section_length: float = 1.0,  # New
     #pitch_error_threshold: bool = True,  # New
 ) -> Optional[MatchFile]:
@@ -783,8 +840,8 @@ def save_match(
         unified_note_ids=unified_note_ids,
         #virtual_snote_map=virtual_snote_map,
         #virtual_pnote_map=virtual_pnote_map,
-        #sections=sections,
-        #omitted_sections=omitted_sections,
+        sections=sections,
+        omitted_sections=omitted_sections,
         #minimal_section_length=minimal_section_length,
         #pitch_error_threshold=pitch_error_threshold,
     )
