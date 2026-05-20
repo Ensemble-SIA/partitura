@@ -129,18 +129,10 @@ def matchfile_from_alignment(
         Version of the match file. For now only 1.0.0 is supported.
     use_new_format : bool
         If True, use the new Match format (Version 2.0.0) with virtual notes and sections.
-    virtual_snote_map : dict or None
-        Mapping for virtual score notes: {score_id: [(perf_id, attr_list), ...]}.
-    virtual_pnote_map : dict or None
-        Mapping for virtual performance notes: {perf_id: [score_id, ...]}.
     sections : list of dict or None
         List of sections: each dict with 'id', 'start_beats_unfolded', etc.
     omitted_sections : list of dict or None
         List of omitted sections.
-    minimal_section_length : float
-        Minimum length (in beats) for auto-detected sections.
-    pitch_error_threshold : bool
-        If True, detect and encode pitch errors as virtualSnotes.
     Returns
     -------
     matchfile : MatchFile
