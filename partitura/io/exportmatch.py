@@ -82,8 +82,6 @@ def matchfile_from_alignment(
     tempo_indication: Optional[str] = None,
     diff_score_version_notes: Optional[list] = None,
     version: Version = LATEST_VERSION,
-    note_to_min_id: Optional[dict] = None,
-    unified_note_ids: Optional[dict] = None,
     sections: Optional[List[dict]] = [],  # New: list of section dicts
     omitted_sections: Optional[List[dict]] = [],  # New: list of omitted section dicts
     debug: bool = False,
@@ -532,31 +530,6 @@ def matchfile_from_alignment(
                 virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(version=version, snote=virtualSnote, note=virtualnote)
                 note_lines.append(virtualSnote_virtualnote_line)
 
-            if version > Version(1, 0, 0):
-                if al_note["score_id"] in unified_note_ids:
-                    # ALIGN ALL REPEATED SNOTES TO THE VIRTUAL_PNOTE
-                    min_id = note_to_min_id[al_note["score_id"]]
-                    duplicates = unified_note_ids[min_id].copy()
-                    duplicates.remove(al_note["score_id"])
-                    virtualnote = MatchVirtualPNote(
-                                    version=version,
-                                    id=al_note["performance_id"],
-                                )
-                    for sid in duplicates:
-                        if sid not in aligned_snotes:
-                            snote = score_info[sid]
-                            snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
-                            note_lines.append(snote_virtualnote_line)
-                            aligned_snotes.append(sid)
-                        else:
-                            virtualSnote = MatchVirtualSnote(
-                                version=version,
-                                anchor=al_note["score_id"],
-                                attributes_list=al_note.get("score_attributes_list", []),
-                            )
-                            virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(version=version, snote=virtualSnote, note=virtualnote)
-                            note_lines.append(virtualSnote_virtualnote_line)
-
         elif label == "deletion":
             skip_deletion = False
             snote = score_info[al_note["score_id"]]
@@ -691,8 +664,6 @@ def save_match(
     performance_filename: Optional[PathLike] = None,
     assume_unfolded: bool = True,
     version: tuple = (LATEST_VERSION.major, LATEST_VERSION.minor, LATEST_VERSION.patch),
-    note_to_min_id: Optional[dict] = None,
-    unified_note_ids: Optional[dict] = None,
     sections: Optional[List[dict]] = [],
     omitted_sections: Optional[List[dict]] = [],
 ) -> Optional[MatchFile]:
@@ -783,8 +754,6 @@ def save_match(
         performance_filename=performance_filename,
         assume_part_unfolded=assume_unfolded,
         version=Version(version[0], version[1], version[2]),
-        note_to_min_id=note_to_min_id,
-        unified_note_ids=unified_note_ids,
         sections=sections,
         omitted_sections=omitted_sections,
     )
