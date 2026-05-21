@@ -71,7 +71,7 @@ from partitura.io.matchfile_utils import (
 
 # Define current version of the match file format
 LATEST_MAJOR_VERSION = 1
-LATEST_MINOR_VERSION = 0
+LATEST_MINOR_VERSION = 1
 LATEST_PATCH_VERSION = 0
 
 LATEST_VERSION = Version(
