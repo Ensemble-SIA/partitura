@@ -451,7 +451,7 @@ class TestMatchLinesV1(unittest.TestCase):
             # assert that the information from the matchline
             # is parsed correctly and results in an identical line
             # to the input match line
-            mo = MatchSectionV1.from_matchline(ml)
+            mo = MatchSectionV1.from_matchline(ml, version=Version(1, 0, 0))
             basic_line_test(mo)
             self.assertTrue(mo.matchline == ml)
 
@@ -1016,6 +1016,52 @@ class TestMatchLinesV1(unittest.TestCase):
             self.assertTrue(False)  # pragma: no cover
         except ValueError:
             self.assertTrue(True)
+    
+    def test_omitted_section_lines_v1_1_0(self):
+        """
+        Test parsing of omitted sections introduced in 1.1.0
+        """
+        from partitura.io.matchlines_v1 import MatchOmittedSection
+        
+        omitted_lines = [
+            "omittedSection(sec1,1.0000,2.0000,1.0000,2.0000,[]).",
+            "omittedSection(sec2,2.0000,4.0000,2.0000,4.0000,[attr1,attr2])."
+        ]
+        
+        for ml in omitted_lines:
+            mo = MatchOmittedSection.from_matchline(ml, version=Version(1, 1, 0))
+            self.assertEqual(mo.matchline, ml)
+            self.assertEqual(mo.version, Version(1, 1, 0))
+            
+        # Should raise an error if parsed with a version older than 1.1.0
+        with self.assertRaises(ValueError):
+            MatchOmittedSection.from_matchline(omitted_lines[0], version=Version(1, 0, 0))
+
+    def test_virtual_note_lines_v1_1_0(self):
+        """
+        Test parsing of virtual notes and their alignments introduced in 1.1.0
+        """
+        from partitura.io.matchlines_v1 import (
+            MatchVirtualPNote,
+            MatchSnoteVirtualNote
+        )
+        
+        # Test MatchVirtualPNote
+        vp_line = "virtualPnote(vpn1,)."
+        vp = MatchVirtualPNote.from_matchline(vp_line, version=Version(1, 1, 0))
+        self.assertEqual(vp.matchline, vp_line)
+        self.assertEqual(vp.Id, "vpn1")
+        
+        # Test MatchSnoteVirtualNote (Standard Snote aligned to a Virtual Pnote)
+        sv_line = "snote(n1,[B,n],3,0:2,1/8,1/8,-0.5000,0.0000,[v1])-virtualPnote(vpn1,)."
+        mo = MatchSnoteVirtualNote.from_matchline(sv_line, version=Version(1, 1, 0))
+        self.assertEqual(mo.matchline, sv_line)
+        self.assertEqual(mo.note.Id, "vpn1")
+        self.assertEqual(mo.snote.Anchor, "n1")
+
+        # Version validation checks
+        with self.assertRaises(ValueError):
+            MatchVirtualPNote.from_matchline(vp_line, version=Version(1, 0, 0))
 
 
 class TestMatchLinesV0(unittest.TestCase):
@@ -1993,6 +2039,50 @@ class TestMatchUtils(unittest.TestCase):
             for component in ks.other_components:
                 key_name = fifths_mode_to_key_name(component.fifths, component.mode)
                 self.assertTrue(str(component).startswith(key_name))
+
+    def test_validate_match_ids_removes_duplicates(self):
+        """
+        Test that validate_match_ids successfully catches duplicate insertions
+        and deletions, issues warnings, and removes the corrupted lines.
+        """
+        import warnings
+        from partitura.io.importmatch import validate_match_ids
+        from partitura.io.matchfile_base import MatchFile
+        from partitura.io.matchlines_v1 import MatchSnoteDeletion, MatchInsertionNote, MatchSnote, MatchNote
+
+        v = Version(1, 0, 0)
+        
+        # Create a mock Score Note and Performance Note
+        sn1 = MatchSnote(v, "n1", "C", 0, 4, 1, 1, FractionalSymbolicDuration(0), FractionalSymbolicDuration(1), 0.0, 1.0, [])
+        pn1 = MatchNote(v, "p1", 60, 0, 100, 64, 1, 0)
+        
+        # Create DUPLICATE deletions (same score Anchor)
+        del1 = MatchSnoteDeletion(v, sn1)
+        del2 = MatchSnoteDeletion(v, sn1) 
+
+        # Create DUPLICATE insertions (same performance Id)
+        ins1 = MatchInsertionNote(v, pn1)
+        ins2 = MatchInsertionNote(v, pn1) 
+
+        # Build MatchFile
+        mf = MatchFile(lines=[del1, del2, ins1, ins2])
+        
+        # Ensure we have 4 lines before validation
+        self.assertEqual(len(mf.lines), 4)
+        
+        # Catch the warnings that validate_match_ids is supposed to emit
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            
+            validate_match_ids(mf)
+            
+            # It should have fired exactly two warnings (one for insertions, one for deletions)
+            self.assertEqual(len(w), 2)
+            self.assertTrue("duplicate score notes" in str(w[0].message))
+            self.assertTrue("duplicate performance notes" in str(w[1].message))
+            
+        # The function removes ALL instances of the duplicates, so lines should be 0
+        self.assertEqual(len(mf.lines), 0)
 
 if __name__ == "__main__":
     unittest.main()

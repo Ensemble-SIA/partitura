@@ -654,7 +654,7 @@ class MatchOmittedSection(MatchLine):
         "{EndInBeatsOriginal},{SectionAttrList})."
     )
     pattern = re.compile(
-        r"section\("
+        r"omittedSection\("
         r"(?P<id>[^,]+),"
         r"(?P<StartInBeatsUnfolded>[^,]+),"
         r"(?P<EndInBeatsUnfolded>[^,]+),"
@@ -673,11 +673,8 @@ class MatchOmittedSection(MatchLine):
         end_in_beats_original: float,
         section_attr_list: List[str],
     ) -> None:
-        if version not in SECTION_LINE:
-            raise ValueError(
-                f"Unknown version {version}!. "
-                f"Supported versions are {list(SECTION_LINE.keys())}"
-            )
+        if version < Version(1, 1, 0):
+            raise ValueError(f"{version} < Version(1, 1, 0)")
         super().__init__(version)
 
         self.field_types = tuple(
@@ -701,11 +698,8 @@ class MatchOmittedSection(MatchLine):
         pos: int = 0,
         version: Version = LATEST_VERSION,
     ) -> MatchSection:
-        if version not in SECTION_LINE:
-            raise ValueError(
-                f"Unknown version {version}!. "
-                f"Supported versions are {list(SECTION_LINE.keys())}"
-            )
+        if version < Version(1, 1, 0):
+            raise ValueError(f"{version} < Version(1, 1, 0)")
 
         match_pattern = cls.pattern.search(matchline, pos=pos)
         class_dict = SECTION_LINE[version]
@@ -1155,7 +1149,7 @@ class MatchNote(BaseNoteLine):
                 track=0,
             )
 
-###############################################################################################################################################
+
 class MatchVirtualPNote(VirtualNoteLine):
     field_names = (
         "Id",
@@ -1197,8 +1191,8 @@ class MatchVirtualPNote(VirtualNoteLine):
         pos: int = 0,
         version: Version = LATEST_VERSION,
     ) -> MatchNote:
-        if version < Version(1, 0, 0):
-            raise ValueError(f"{version} < Version(1, 0, 0)")
+        if version < Version(1, 1, 0):
+            raise ValueError(f"{version} < Version(1, 1, 0)")
 
         kwargs = get_kwargs_from_matchline(
             matchline=matchline,
