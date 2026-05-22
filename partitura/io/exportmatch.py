@@ -473,6 +473,37 @@ def matchfile_from_alignment(
         duplicate_idx = np.hstack(list(duplicates.values()))
         voice_overlap_note_ids = list(sna[duplicate_idx]["id"])
 
+    # should we sort the alignment at all? Shouldn't it be the alignment algorithm's job to also define where the deletions happen in the alignment?
+    if version > Version(1, 0, 0):
+        sortable_alignment = []
+        
+        for i, al in enumerate(alignment):
+            pid = al.get("performance_id")
+            
+            if pid and pid in perf_info:
+                # Matches, Insertions, Ornaments: Use exact recorded MIDI ticks
+                onset = perf_info[pid].Onset
+                sort_key = (onset, 0, i)
+            else:
+                # map Score Time to Performance Time
+                sid = al.get("score_id")
+                snote = score_info[sid]
+                
+                # Map Score Beats -> Estimated Performance Seconds
+                est_perf_sec = float(stime_to_ptime_map(snote.OnsetInBeats))
+                # Convert Seconds -> MIDI Ticks
+                onset = seconds_to_midi_ticks(est_perf_sec, mpq=mpq, ppq=ppq)
+                
+                # '1' ensures deletions sort safely after played notes at the exact same tick
+                sort_key = (onset, 1, i)
+                
+            sortable_alignment.append((sort_key, al))
+            
+        # Sort ascending based on the keys
+        sortable_alignment.sort(key=lambda item: item[0])
+        
+        # Unpack back into the standard alignment list
+        alignment = [item[1] for item in sortable_alignment]
 
     aligned_snotes, aligned_pnotes = [], []
 
@@ -508,6 +539,8 @@ def matchfile_from_alignment(
             elif al_note["score_id"] not in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
                 # SNOTE - VIRTUAL_PNOTE
                 snote = score_info[al_note["score_id"]]
+                attributes_list = al_note.get("score_attributes_list", [])
+                snote.ScoreAttributesList += attributes_list
                 virtualnote = MatchVirtualPNote(
                                     version=version,
                                     id=al_note["performance_id"],
