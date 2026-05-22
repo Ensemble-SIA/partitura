@@ -84,7 +84,7 @@ def matchfile_from_alignment(
     version: Version = LATEST_VERSION,
     sections: Optional[List[dict]] = [],
     omitted_sections: Optional[List[dict]] = [],
-    sort_alignment: Optional[Union[str, bool]] = "default",    
+    sort_alignment: Optional[Union[str, bool]] = "default",
     debug: bool = False,
 ) -> MatchFile:
     """
@@ -130,7 +130,7 @@ def matchfile_from_alignment(
     omitted_sections : list of dict or None
         List of omitted sections.
     sort_alignment : str, bool, or None, optional
-        Chronological alignment sorting method: "ptime" (performance time), "stime" (score time), 
+        Chronological alignment sorting method: "ptime" (performance time), "stime" (score time),
         "default" ("ptime" if version > 1.0.0, else "stime"), or False/None (keep original order).
     Returns
     -------
@@ -196,7 +196,7 @@ def matchfile_from_alignment(
     )
 
     if sort_alignment == "default":
-        if version > Version(1,0,0):
+        if version > Version(1, 0, 0):
             sort_alignment = "ptime"
         else:
             sort_alignment = "stime"
@@ -220,8 +220,10 @@ def matchfile_from_alignment(
     measures = measures[measure_sorting_idx]
 
     start_measure_num = 0 if measure_starts_beats.min() < 0 else 1
-    seq_measure_nums = np.arange(start_measure_num, start_measure_num + len(measure_starts_divs))
-    
+    seq_measure_nums = np.arange(
+        start_measure_num, start_measure_num + len(measure_starts_divs)
+    )
+
     # parse native measure numbers
     parsed_nums = []
     for i, m in enumerate(measures):
@@ -236,7 +238,7 @@ def matchfile_from_alignment(
     # global offset based on first measure:
     # if anacrusis: first measure == 0 -> otherwise, 1_
     expected_first_num = 0 if measure_starts_beats.min() < 0 else 1
-    
+
     if len(parsed_nums) > 0:
         offset = expected_first_num - parsed_nums[0]
         actual_measure_nums = [n + offset for n in parsed_nums]
@@ -427,7 +429,9 @@ def matchfile_from_alignment(
                 snote.doc_order if snote.doc_order is not None else 0,
             )
             mapped_snote_sort_info[snote.id] = (
-                seconds_to_midi_ticks(float(stime_to_ptime_map(onset_beats)), mpq=mpq, ppq=ppq),
+                seconds_to_midi_ticks(
+                    float(stime_to_ptime_map(onset_beats)), mpq=mpq, ppq=ppq
+                ),
                 snote.midi_pitch,
             )
 
@@ -471,9 +475,9 @@ def matchfile_from_alignment(
             pnote["midi_pitch"],
         )
         pnote_sort_info[pnote["id"]] = (
-                onset,
-                pnote["midi_pitch"],
-            )
+            onset,
+            pnote["midi_pitch"],
+        )
 
     sort_stime, sort_ptime = [], []
     note_lines = []
@@ -498,7 +502,10 @@ def matchfile_from_alignment(
         label = al_note["label"]
 
         if label == "match":
-            if al_note["score_id"] not in aligned_snotes and al_note["performance_id"] not in aligned_pnotes: # always true when using old_format
+            if (
+                al_note["score_id"] not in aligned_snotes
+                and al_note["performance_id"] not in aligned_pnotes
+            ):  # always true when using old_format
                 # SNOTE - PNOTE
                 snote = score_info[al_note["score_id"]]
                 if version > Version(1, 0, 0):
@@ -507,49 +514,66 @@ def matchfile_from_alignment(
                     aligned_snotes.append(al_note["score_id"])
                     aligned_pnotes.append(al_note["performance_id"])
                 pnote = perf_info[al_note["performance_id"]]
-                snote_note_line = MatchSnoteNote(version=version, snote=snote, note=pnote)
+                snote_note_line = MatchSnoteNote(
+                    version=version, snote=snote, note=pnote
+                )
                 note_lines.append(snote_note_line)
                 sort_stime.append(snote_sort_info[al_note["score_id"]])
                 sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
-            elif al_note["score_id"] in aligned_snotes and al_note["performance_id"] not in aligned_pnotes:
+            elif (
+                al_note["score_id"] in aligned_snotes
+                and al_note["performance_id"] not in aligned_pnotes
+            ):
                 # VIRTUAL_SNOTE - PNOTE
                 virtualSnote = MatchVirtualSnote(
-                                version=version,
-                                anchor=al_note["score_id"],
-                                attributes_list=al_note.get("score_attributes_list", []),
-                            )
+                    version=version,
+                    anchor=al_note["score_id"],
+                    attributes_list=al_note.get("score_attributes_list", []),
+                )
                 pnote = perf_info[al_note["performance_id"]]
-                virtualSnote_note_line = MatchVirtualSnoteNote(version=version, snote=virtualSnote, note=pnote)
+                virtualSnote_note_line = MatchVirtualSnoteNote(
+                    version=version, snote=virtualSnote, note=pnote
+                )
                 note_lines.append(virtualSnote_note_line)
                 aligned_pnotes.append(al_note["performance_id"])
                 sort_stime.append(snote_sort_info[al_note["score_id"]])
                 sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
-            elif al_note["score_id"] not in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
+            elif (
+                al_note["score_id"] not in aligned_snotes
+                and al_note["performance_id"] in aligned_pnotes
+            ):
                 # SNOTE - VIRTUAL_PNOTE
                 snote = score_info[al_note["score_id"]]
                 attributes_list = al_note.get("score_attributes_list", [])
                 snote.ScoreAttributesList += attributes_list
                 virtualnote = MatchVirtualPNote(
-                                    version=version,
-                                    id=al_note["performance_id"],
-                                )
-                snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
+                    version=version,
+                    id=al_note["performance_id"],
+                )
+                snote_virtualnote_line = MatchSnoteVirtualNote(
+                    version=version, snote=snote, note=virtualnote
+                )
                 note_lines.append(snote_virtualnote_line)
                 aligned_snotes.append(al_note["score_id"])
                 sort_stime.append(snote_sort_info[al_note["score_id"]])
                 sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
-            elif al_note["score_id"] in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
+            elif (
+                al_note["score_id"] in aligned_snotes
+                and al_note["performance_id"] in aligned_pnotes
+            ):
                 # VIRTUAL_SNOTE - VIRTUAL_PNOTE
                 virtualSnote = MatchVirtualSnote(
-                                version=version,
-                                anchor=al_note["score_id"],
-                                attributes_list=al_note.get("score_attributes_list", []),
-                            )
+                    version=version,
+                    anchor=al_note["score_id"],
+                    attributes_list=al_note.get("score_attributes_list", []),
+                )
                 virtualnote = MatchVirtualPNote(
-                                    version=version,
-                                    id=al_note["performance_id"],
-                                )
-                virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(version=version, snote=virtualSnote, note=virtualnote)
+                    version=version,
+                    id=al_note["performance_id"],
+                )
+                virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(
+                    version=version, snote=virtualSnote, note=virtualnote
+                )
                 note_lines.append(virtualSnote_virtualnote_line)
                 sort_stime.append(snote_sort_info[al_note["score_id"]])
                 sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
@@ -557,12 +581,17 @@ def matchfile_from_alignment(
         elif label == "deletion":
             skip_deletion = False
             snote = score_info[al_note["score_id"]]
-            if version > Version(1,0,0):
-                for om_sec in omitted_sections: # nothing gets skipped if omitted_sections = []
-                    if snote.OnsetInBeats > om_sec["start_in_beats_unfolded"] and snote.OnsetInBeats < om_sec["end_in_beats_unfolded"]:
+            if version > Version(1, 0, 0):
+                for (
+                    om_sec
+                ) in omitted_sections:  # nothing gets skipped if omitted_sections = []
+                    if (
+                        snote.OnsetInBeats > om_sec["start_in_beats_unfolded"]
+                        and snote.OnsetInBeats < om_sec["end_in_beats_unfolded"]
+                    ):
                         skip_deletion = True
                         break
-                
+
             if not skip_deletion:
                 if al_note["score_id"] in voice_overlap_note_ids:
                     snote.ScoreAttributesList.append("voice_overlap")
@@ -573,7 +602,6 @@ def matchfile_from_alignment(
                 note_lines.append(deletion_line)
                 sort_stime.append(snote_sort_info[al_note["score_id"]])
                 sort_ptime.append(mapped_snote_sort_info[al_note["score_id"]])
-                    
 
         elif label == "insertion":
             note = perf_info[al_note["performance_id"]]
@@ -581,7 +609,6 @@ def matchfile_from_alignment(
             note_lines.append(insertion_line)
             sort_stime.append(mapped_pnote_sort_info[al_note["performance_id"]])
             sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
-
 
         elif label == "ornament":
             ornament_type = al_note["type"]
@@ -597,34 +624,32 @@ def matchfile_from_alignment(
             note_lines.append(ornament_line)
             sort_stime.append(mapped_pnote_sort_info[al_note["performance_id"]])
             sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
-            
-                
 
     if version > Version(1, 0, 0):
         section_lines, omitted_section_lines = [], []
         for sec in sections or []:
             section_line = MatchSection(
                 version=version,
-                id=sec['id'],
-                start_in_beats_unfolded=sec['start_in_beats_unfolded'],
-                end_in_beats_unfolded=sec['end_in_beats_unfolded'],
-                start_in_beats_original=sec['start_in_beats_original'],
-                end_in_beats_original=sec['end_in_beats_original'],
-                start_in_perf_time=sec['start_in_perf_time'],
-                end_in_perf_time=sec['end_in_perf_time'],
-                section_attr_list=sec['section_attr_list']
+                id=sec["id"],
+                start_in_beats_unfolded=sec["start_in_beats_unfolded"],
+                end_in_beats_unfolded=sec["end_in_beats_unfolded"],
+                start_in_beats_original=sec["start_in_beats_original"],
+                end_in_beats_original=sec["end_in_beats_original"],
+                start_in_perf_time=sec["start_in_perf_time"],
+                end_in_perf_time=sec["end_in_perf_time"],
+                section_attr_list=sec["section_attr_list"],
             )
             section_lines.append(section_line)
 
         for osec in omitted_sections or []:
             omitted_section_line = MatchOmittedSection(
                 version=version,
-                id=osec['id'],
-                start_in_beats_unfolded=osec['start_in_beats_unfolded'],
-                end_in_beats_unfolded=osec['end_in_beats_unfolded'],
-                start_in_beats_original=osec['start_in_beats_original'],
-                end_in_beats_original=osec['end_in_beats_original'],
-                section_attr_list=osec['section_attr_list']
+                id=osec["id"],
+                start_in_beats_unfolded=osec["start_in_beats_unfolded"],
+                end_in_beats_unfolded=osec["end_in_beats_unfolded"],
+                start_in_beats_original=osec["start_in_beats_original"],
+                end_in_beats_original=osec["end_in_beats_original"],
+                section_attr_list=osec["section_attr_list"],
             )
             omitted_section_lines.append(omitted_section_line)
 
@@ -750,7 +775,7 @@ def save_match(
     omitted_sections : list of dict or None
         List of omitted sections.
     sort_alignment : str, bool, or None, optional
-        Chronological alignment sorting method: "ptime" (performance time), "stime" (score time), 
+        Chronological alignment sorting method: "ptime" (performance time), "stime" (score time),
         "default" ("ptime" if version > 1.0.0, else "stime"), or False/None (keep original order).
     Returns
     -------

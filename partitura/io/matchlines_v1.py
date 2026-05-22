@@ -482,7 +482,7 @@ SECTION_LINE = {
         "StartInPerfTime": (interpret_as_int, format_int, int),
         "EndInPerfTime": (interpret_as_int, format_int, int),
         "SectionAttrList": (interpret_as_list, format_list, list),
-    }
+    },
 }
 
 
@@ -716,7 +716,7 @@ class MatchOmittedSection(MatchLine):
 
         else:
             raise MatchError("Input match line does not fit the expected pattern.")
-      
+
 
 STIME_LINE = {
     Version(1, 0, 0): {
@@ -951,7 +951,8 @@ class MatchSnote(BaseSnoteLine):
             offset_in_beats=instance.OffsetInBeats,
             score_attributes_list=instance.ScoreAttributesList,
         )
-    
+
+
 class MatchVirtualSnote(VirtualSnoteLine):
     format_fun = dict(
         Anchor=format_string,
@@ -965,7 +966,9 @@ class MatchVirtualSnote(VirtualSnoteLine):
         attributes_list: List[str],
     ) -> None:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
         super().__init__(
             version=version,
             anchor=anchor,
@@ -999,7 +1002,9 @@ class MatchVirtualSnote(VirtualSnoteLine):
         """
 
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         kwargs = cls.prepare_kwargs_from_matchline(
             matchline=matchline,
@@ -1015,7 +1020,9 @@ class MatchVirtualSnote(VirtualSnoteLine):
         version: Version = LATEST_VERSION,
     ) -> MatchSnote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         if not isinstance(instance, VirtualSnoteLine):
             raise ValueError("`instance` needs to be a subclass of `VirtualSnoteLine`")
@@ -1151,17 +1158,11 @@ class MatchNote(BaseNoteLine):
 
 
 class MatchVirtualPNote(VirtualNoteLine):
-    field_names = (
-        "Id",
-    )
+    field_names = ("Id",)
 
-    out_pattern = (
-        "virtualPnote({Id},)."
-    )
+    out_pattern = "virtualPnote({Id},)."
 
-    pattern = re.compile(
-        r"virtualPnote\((?P<Id>[^,]+),"
-    )
+    pattern = re.compile(r"virtualPnote\((?P<Id>[^,]+),")
 
     def __init__(
         self,
@@ -1311,7 +1312,8 @@ class MatchSnoteNote(BaseSnoteNoteLine):
             snote=MatchSnote.from_instance(instance.snote, version=version),
             note=MatchNote.from_instance(instance.note, version=version),
         )
-    
+
+
 class MatchSnoteVirtualNote(BaseSnoteVirtualNoteLine):
     def __init__(
         self,
@@ -1332,7 +1334,9 @@ class MatchSnoteVirtualNote(BaseSnoteVirtualNoteLine):
         version: Version = LATEST_VERSION,
     ) -> MatchSnoteVirtualNote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         kwargs = cls.prepare_kwargs_from_matchline(
             matchline=matchline,
@@ -1348,17 +1352,21 @@ class MatchSnoteVirtualNote(BaseSnoteVirtualNoteLine):
         cls, instance: BaseSnoteVirtualNoteLine, version: Version
     ) -> MatchSnoteVirtualNote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         if not isinstance(instance, BaseSnoteVirtualNoteLine):
-            raise ValueError("`instance` needs to be a subclass of `BaseSnoteVirtualNoteLine`")
+            raise ValueError(
+                "`instance` needs to be a subclass of `BaseSnoteVirtualNoteLine`"
+            )
 
         return cls(
             version=version,
             snote=MatchSnote.from_instance(instance.snote, version=version),
             note=MatchVirtualPNote.from_instance(instance.note, version=version),
         )
-    
+
 
 class MatchVirtualSnoteNote(VirtualSnoteNoteLine):
     def __init__(
@@ -1380,7 +1388,9 @@ class MatchVirtualSnoteNote(VirtualSnoteNoteLine):
         version: Version = LATEST_VERSION,
     ) -> MatchVirtualSnoteNote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         kwargs = cls.prepare_kwargs_from_matchline(
             matchline=matchline,
@@ -1396,10 +1406,14 @@ class MatchVirtualSnoteNote(VirtualSnoteNoteLine):
         cls, instance: VirtualSnoteNoteLine, version: Version
     ) -> MatchVirtualSnoteNote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         if not isinstance(instance, VirtualSnoteNoteLine):
-            raise ValueError("`instance` needs to be a subclass of `VirtualSnoteNoteLine`")
+            raise ValueError(
+                "`instance` needs to be a subclass of `VirtualSnoteNoteLine`"
+            )
 
         return cls(
             version=version,
@@ -1428,7 +1442,9 @@ class MatchVirtualSnoteVirtualNote(VirtualSnoteVirtualNoteLine):
         version: Version = LATEST_VERSION,
     ) -> MatchVirtualSnoteVirtualNote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         kwargs = cls.prepare_kwargs_from_matchline(
             matchline=matchline,
@@ -1444,10 +1460,14 @@ class MatchVirtualSnoteVirtualNote(VirtualSnoteVirtualNoteLine):
         cls, instance: VirtualSnoteVirtualNoteLine, version: Version
     ) -> MatchVirtualSnoteVirtualNote:
         if version < Version(1, 1, 0):
-            raise MatchError(f"Version {version} is not supported by this 1.1.0 parser.")
+            raise MatchError(
+                f"Version {version} is not supported by this 1.1.0 parser."
+            )
 
         if not isinstance(instance, VirtualSnoteVirtualNoteLine):
-            raise ValueError("`instance` needs to be a subclass of `VirtualSnoteVirtualNoteLine`")
+            raise ValueError(
+                "`instance` needs to be a subclass of `VirtualSnoteVirtualNoteLine`"
+            )
 
         return cls(
             version=version,

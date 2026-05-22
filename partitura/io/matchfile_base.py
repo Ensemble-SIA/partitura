@@ -668,14 +668,10 @@ class VirtualSnoteLine(MatchLine):
         list,
     )
 
-    out_pattern = (
-        "virtualSnote({Anchor},{AttributesList})"
-    )
+    out_pattern = "virtualSnote({Anchor},{AttributesList})"
 
     pattern = re.compile(
-        r"virtualSnote\("
-        r"(?P<Anchor>[^,]+),"
-        r"\[(?P<AttributesList>.*)\]\)"
+        r"virtualSnote\(" r"(?P<Anchor>[^,]+)," r"\[(?P<AttributesList>.*)\]\)"
     )
 
     format_fun = dict(
@@ -720,7 +716,7 @@ class VirtualSnoteLine(MatchLine):
 
         else:
             raise MatchError("Input match line does not fit the expected pattern.")
-        
+
 
 class BaseNoteLine(MatchLine):
     # All derived classes should include at least
@@ -762,17 +758,14 @@ class BaseNoteLine(MatchLine):
     @property
     def Duration(self):
         return self.Offset - self.Onset
-    
+
+
 class VirtualNoteLine(MatchLine):
     # All derived classes should include at least
     # these field names
-    field_names = (
-        "Id",
-    )
+    field_names = ("Id",)
 
-    field_types = (
-        str,
-    )
+    field_types = (str,)
 
     def __init__(
         self,
@@ -870,7 +863,8 @@ class BaseSnoteNoteLine(MatchLine):
         )
 
         return kwargs
-    
+
+
 class BaseSnoteVirtualNoteLine(MatchLine):
     out_pattern = "{SnoteLine}-{VirtualNoteLine}"
 
@@ -958,7 +952,7 @@ class BaseSnoteVirtualNoteLine(MatchLine):
         )
 
         return kwargs
-    
+
 
 class VirtualSnoteNoteLine(MatchLine):
     out_pattern = "{VirtualSnoteLine}-{NoteLine}"
@@ -1047,7 +1041,7 @@ class VirtualSnoteNoteLine(MatchLine):
         )
 
         return kwargs
-    
+
 
 class VirtualSnoteVirtualNoteLine(MatchLine):
     out_pattern = "{VirtualSnoteLine}-{VirtualNoteLine}"
