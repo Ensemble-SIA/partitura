@@ -1006,7 +1006,7 @@ def _handle_direction(e, position, part, ongoing):
             # words items, so we loop:
             for child in direction_type:
                 # try to make a direction out of words
-                if child.text is None: 
+                if child.text is None:
                     continue
 
                 parse_result = parse_direction(child.text)

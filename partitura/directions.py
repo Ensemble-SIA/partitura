@@ -518,7 +518,7 @@ def parse_direction(string):
     global DEFAULT_PARSER
 
     if DEFAULT_PARSER:
-        string = string.strip().rstrip(".") # remove trailing punctuation
+        string = string.strip().rstrip(".")  # remove trailing punctuation
         try:
             parse_result = DEFAULT_PARSER.parse(string)
             direction = create_directions(parse_result, string)
