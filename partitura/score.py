@@ -719,6 +719,10 @@ class Part(object):
         active at that time. Returns None for times before the first direction,
         and fills forward after the last direction.
         The function can take scalar values or lists/arrays of values.
+        
+        Note: Currently this function does not consider changes in the time signature, and takes as 
+        fallback duration a fixed length of the duration of the first measure in a score.
+
         Returns
         -------
         function
