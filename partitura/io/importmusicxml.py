@@ -1371,13 +1371,24 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     if chord is not None:
         # this note starts at the same position as the previous note, and has
         # same duration
-        assert prev_note is not None
-        is_grace_chord = True
-        if prev_note.is_grace_chord == False:
-            prev_note.is_grace_chord = True
-        position = prev_note.start.t
-        duration = prev_note.duration
-        duration_from_symbolic = prev_note.duration_from_symbolic
+        if prev_note is None:
+            # Malformed MusicXML: a <chord> child on the first note of a part
+            # (or first after a backup/forward) leaves us with no anchor to
+            # copy timing from. Warn and continue, treating this note as a
+            # standalone — better than the bare AssertionError this used to
+            # raise, which crashed the whole load.
+            warnings.warn(
+                "Found <chord> on a note with no preceding note (malformed "
+                "MusicXML); treating as a standalone note.",
+                stacklevel=2,
+            )
+        else:
+            is_grace_chord = True
+            if prev_note.is_grace_chord == False:
+                prev_note.is_grace_chord = True
+            position = prev_note.start.t
+            duration = prev_note.duration
+            duration_from_symbolic = prev_note.duration_from_symbolic
 
     articulations_e = e.find("notations/articulations")
     if articulations_e is not None:
