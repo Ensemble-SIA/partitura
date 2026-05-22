@@ -28,6 +28,7 @@ except:
     VEROVIO_AVAILABLE = False
 
 import re
+from contextlib import nullcontext
 import warnings
 
 import numpy as np
@@ -37,7 +38,7 @@ MSCORE_ENDING_PATTERN = re.compile(r"mscore-ending-(\d+)")
 
 
 @deprecated_alias(mei_path="filename")
-def load_mei(filename: PathLike) -> score.Score:
+def load_mei(filename: PathLike, quiet: bool = False) -> score.Score:
     """
     Loads a Mei score from path and returns a partitura Score object.
 
@@ -45,26 +46,33 @@ def load_mei(filename: PathLike) -> score.Score:
     ----------
     filename : PathLike
         The path to an MEI score.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
     scr: :class:`partitura.score.Score`
         A `Score` object
     """
-    parser = MeiParser(filename)
-    doc_name = get_document_name(filename)
-    # create parts from the specifications in the mei
-    parser.create_parts()
-    # fill parts with the content from the mei
-    parser.fill_parts()
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
+        parser = MeiParser(filename)
+        doc_name = get_document_name(filename)
+        # create parts from the specifications in the mei
+        parser.create_parts()
+        # fill parts with the content from the mei
+        parser.fill_parts()
 
-    # TODO: Parse score info (composer, lyricist, etc.)
-    scr = score.Score(
-        id=doc_name,
-        partlist=parser.parts,
-    )
+        # TODO: Parse score info (composer, lyricist, etc.)
+        scr = score.Score(
+            id=doc_name,
+            partlist=parser.parts,
+        )
 
-    return scr
+        return scr
 
 
 class MeiParser(object):

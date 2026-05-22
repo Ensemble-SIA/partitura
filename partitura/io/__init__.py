@@ -45,7 +45,7 @@ def is_url(input):
 
 @deprecated_alias(score_fn="filename")
 @deprecated_parameter("ensure_list")
-def load_score(filename: PathLike, force_note_ids="keep") -> Score:
+def load_score(filename: PathLike, force_note_ids="keep", quiet: bool = False) -> Score:
     """
     Load a score format supported by partitura. Currently the accepted formats
     are MusicXML, MIDI, Kern and MEI, plus all formats for which
@@ -62,6 +62,9 @@ def load_score(filename: PathLike, force_note_ids="keep") -> Score:
         a note id will be assigned one. If None or False, the notes in the
         resulting Part(s) will have an id only if the input file has ids for
         the notes.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -93,6 +96,7 @@ def load_score(filename: PathLike, force_note_ids="keep") -> Score:
         score = load_musicxml(
             filename=filename,
             force_note_ids=force_note_ids,
+            quiet=quiet,
         )
     elif extension in [".midi", ".mid"]:
         # Load MIDI
@@ -103,14 +107,16 @@ def load_score(filename: PathLike, force_note_ids="keep") -> Score:
         score = load_score_midi(
             filename=filename,
             assign_note_ids=assign_note_ids,
+            quiet=quiet,
         )
     elif extension in [".mei"]:
         # Load MEI
-        score = load_mei(filename=filename)
+        score = load_mei(filename=filename, quiet=quiet)
     elif extension in [".kern", ".krn"]:
         score = load_kern(
             filename=filename,
             force_note_ids=force_note_ids,
+            quiet=quiet,
         )
     elif extension in [
         ".mscz",
@@ -139,12 +145,14 @@ def load_score(filename: PathLike, force_note_ids="keep") -> Score:
         score = load_via_musescore(
             filename=filename,
             force_note_ids=force_note_ids,
+            quiet=quiet,
         )
     elif extension in [".match"]:
         # Load the score information from a Matchfile
         _, _, score = load_match(
             filename=filename,
             create_score=True,
+            quiet=quiet,
         )
     else:
         raise NotSupportedFormatError(
@@ -153,7 +161,7 @@ def load_score(filename: PathLike, force_note_ids="keep") -> Score:
     return score
 
 
-def load_score_as_part(filename: PathLike) -> Part:
+def load_score_as_part(filename: PathLike, quiet: bool = False) -> Part:
     """
     load part helper function:
     Load a score format supported by partitura and
@@ -163,13 +171,16 @@ def load_score_as_part(filename: PathLike) -> Part:
     ----------
     filename : str or file-like  object
         Filename of the score to parse, or a file-like object
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
     part: :class:`partitura.score.Part`
         A part instance.
     """
-    scr = load_score(filename)
+    scr = load_score(filename, quiet=quiet)
     part = merge_parts(scr.parts)
     return part
 
@@ -185,6 +196,7 @@ def load_performance(
     merge_tracks: bool = False,
     first_note_at_zero: bool = False,
     pedal_threshold: int = 64,
+    quiet: bool = False,
 ) -> Performance:
     """
     Load a performance format supported by partitura. Currently the accepted formats
@@ -204,6 +216,9 @@ def load_performance(
         first MIDI message, e.g., pedal) starts at time 0.
     pedal_threshold: int
         Threshold for the sustain pedal.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -225,6 +240,7 @@ def load_performance(
             filename=filename,
             default_bpm=default_bpm,
             merge_tracks=merge_tracks,
+            quiet=quiet,
         )
 
         # set threshold for sustain pedal
@@ -241,6 +257,7 @@ def load_performance(
             filename=filename,
             first_note_at_zero=first_note_at_zero,
             pedal_threshold=pedal_threshold,
+            quiet=quiet,
         )
     except Exception as e:
         exception_dictionary["match"] = e
