@@ -10,7 +10,7 @@ Notes
 
 import numpy as np
 
-from typing import List, Optional, Iterable
+from typing import List, Optional, Iterable, Union
 
 from collections import defaultdict
 
@@ -82,8 +82,9 @@ def matchfile_from_alignment(
     tempo_indication: Optional[str] = None,
     diff_score_version_notes: Optional[list] = None,
     version: Version = LATEST_VERSION,
-    sections: Optional[List[dict]] = [],  # New: list of section dicts
-    omitted_sections: Optional[List[dict]] = [],  # New: list of omitted section dicts
+    sections: Optional[List[dict]] = [],
+    omitted_sections: Optional[List[dict]] = [],
+    sort_alignment: Optional[Union[str, bool]] = "default",    
     debug: bool = False,
 ) -> MatchFile:
     """
@@ -125,9 +126,12 @@ def matchfile_from_alignment(
     version: Version
         Version of the match file. For now only versions higher or equal to 1.0.0 are supported.
     sections : list of dict or None
-        List of sections: each dict with 'id', 'start_beats_unfolded', etc.
+        List of sections: each dict with 'id', 'start_in_beats_unfolded', etc.
     omitted_sections : list of dict or None
         List of omitted sections.
+    sort_alignment : str, bool, or None, optional
+        Chronological alignment sorting method: "ptime" (performance time), "stime" (score time), 
+        "default" ("ptime" if version > 1.0.0, else "stime"), or False/None (keep original order).
     Returns
     -------
     matchfile : MatchFile
@@ -191,9 +195,16 @@ def matchfile_from_alignment(
         value=int(mpq),
     )
 
+    if sort_alignment == "default":
+        if version > Version(1,0,0):
+            sort_alignment = "ptime"
+        else:
+            sort_alignment = "stime"
+
     # Measure map (which measure corresponds to which time point in divs)
     beat_map = spart.beat_map
 
+    # TODO: For rehearsals / section jumps it might make sense to have individual time mappings per section and sort accordingly
     ptime_to_stime_map, stime_to_ptime_map = get_time_maps_from_alignment(
         ppart_or_note_array=ppart.note_array(),
         spart_or_note_array=spart.note_array(),
@@ -245,7 +256,7 @@ def matchfile_from_alignment(
     # For score notes
     score_info = dict()
     # Info for sorting lines
-    snote_sort_info = dict()
+    snote_sort_info, mapped_snote_sort_info = dict(), dict()
     for (mnum, msd, msb), m in zip(measure_starts, measures):
         if mnum == 0:
             # handle offsets in anacrusis measure
@@ -415,6 +426,10 @@ def matchfile_from_alignment(
                 onset_beats,
                 snote.doc_order if snote.doc_order is not None else 0,
             )
+            mapped_snote_sort_info[snote.id] = (
+                seconds_to_midi_ticks(float(stime_to_ptime_map(onset_beats)), mpq=mpq, ppq=ppq),
+                snote.midi_pitch,
+            )
 
     # # NOTE time position is hardcoded, not pretty...  Assumes there is only one tempo indication at the beginning of the score
     if tempo_indication is not None:
@@ -433,7 +448,7 @@ def matchfile_from_alignment(
         scoreprop_lines["tempo_indication"].append(score_tempo_direction_header)
 
     perf_info = dict()
-    pnote_sort_info = dict()
+    pnote_sort_info, mapped_pnote_sort_info = dict(), dict()
     for pnote in ppart.notes:
         onset = seconds_to_midi_ticks(pnote["note_on"], mpq=mpq, ppq=ppq)
         offset = seconds_to_midi_ticks(pnote["note_off"], mpq=mpq, ppq=ppq)
@@ -451,12 +466,16 @@ def matchfile_from_alignment(
             channel=pnote.get("channel", 0),
             track=pnote.get("track", 0),
         )
-        pnote_sort_info[pnote["id"]] = (
+        mapped_pnote_sort_info[pnote["id"]] = (
             float(ptime_to_stime_map(pnote["note_on"])),
             pnote["midi_pitch"],
         )
+        pnote_sort_info[pnote["id"]] = (
+                onset,
+                pnote["midi_pitch"],
+            )
 
-    sort_stime = []
+    sort_stime, sort_ptime = [], []
     note_lines = []
 
     # Get ids of notes which voice overlap
@@ -473,38 +492,6 @@ def matchfile_from_alignment(
         duplicate_idx = np.hstack(list(duplicates.values()))
         voice_overlap_note_ids = list(sna[duplicate_idx]["id"])
 
-    # should we sort the alignment at all? Shouldn't it be the alignment algorithm's job to also define where the deletions happen in the alignment?
-    if version > Version(1, 0, 0):
-        sortable_alignment = []
-        
-        for i, al in enumerate(alignment):
-            pid = al.get("performance_id")
-            
-            if pid and pid in perf_info:
-                # Matches, Insertions, Ornaments: Use exact recorded MIDI ticks
-                onset = perf_info[pid].Onset
-                sort_key = (onset, 0, i)
-            else:
-                # map Score Time to Performance Time
-                sid = al.get("score_id")
-                snote = score_info[sid]
-                
-                # Map Score Beats -> Estimated Performance Seconds
-                est_perf_sec = float(stime_to_ptime_map(snote.OnsetInBeats))
-                # Convert Seconds -> MIDI Ticks
-                onset = seconds_to_midi_ticks(est_perf_sec, mpq=mpq, ppq=ppq)
-                
-                # '1' ensures deletions sort safely after played notes at the exact same tick
-                sort_key = (onset, 1, i)
-                
-            sortable_alignment.append((sort_key, al))
-            
-        # Sort ascending based on the keys
-        sortable_alignment.sort(key=lambda item: item[0])
-        
-        # Unpack back into the standard alignment list
-        alignment = [item[1] for item in sortable_alignment]
-
     aligned_snotes, aligned_pnotes = [], []
 
     for al_note in alignment:
@@ -514,17 +501,16 @@ def matchfile_from_alignment(
             if al_note["score_id"] not in aligned_snotes and al_note["performance_id"] not in aligned_pnotes: # always true when using old_format
                 # SNOTE - PNOTE
                 snote = score_info[al_note["score_id"]]
-                attributes_list = al_note.get("score_attributes_list", [])
-                snote.ScoreAttributesList += attributes_list
+                if version > Version(1, 0, 0):
+                    attributes_list = al_note.get("score_attributes_list", [])
+                    snote.ScoreAttributesList += attributes_list
+                    aligned_snotes.append(al_note["score_id"])
+                    aligned_pnotes.append(al_note["performance_id"])
                 pnote = perf_info[al_note["performance_id"]]
                 snote_note_line = MatchSnoteNote(version=version, snote=snote, note=pnote)
                 note_lines.append(snote_note_line)
-                
-                if version > Version(1, 0, 0):
-                    aligned_snotes.append(al_note["score_id"])
-                    aligned_pnotes.append(al_note["performance_id"])
-                else:
-                    sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
             elif al_note["score_id"] in aligned_snotes and al_note["performance_id"] not in aligned_pnotes:
                 # VIRTUAL_SNOTE - PNOTE
                 virtualSnote = MatchVirtualSnote(
@@ -536,6 +522,8 @@ def matchfile_from_alignment(
                 virtualSnote_note_line = MatchVirtualSnoteNote(version=version, snote=virtualSnote, note=pnote)
                 note_lines.append(virtualSnote_note_line)
                 aligned_pnotes.append(al_note["performance_id"])
+                sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
             elif al_note["score_id"] not in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
                 # SNOTE - VIRTUAL_PNOTE
                 snote = score_info[al_note["score_id"]]
@@ -548,6 +536,8 @@ def matchfile_from_alignment(
                 snote_virtualnote_line = MatchSnoteVirtualNote(version=version, snote=snote, note=virtualnote)
                 note_lines.append(snote_virtualnote_line)
                 aligned_snotes.append(al_note["score_id"])
+                sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
             elif al_note["score_id"] in aligned_snotes and al_note["performance_id"] in aligned_pnotes:
                 # VIRTUAL_SNOTE - VIRTUAL_PNOTE
                 virtualSnote = MatchVirtualSnote(
@@ -561,29 +551,37 @@ def matchfile_from_alignment(
                                 )
                 virtualSnote_virtualnote_line = MatchVirtualSnoteVirtualNote(version=version, snote=virtualSnote, note=virtualnote)
                 note_lines.append(virtualSnote_virtualnote_line)
+                sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
 
         elif label == "deletion":
             skip_deletion = False
             snote = score_info[al_note["score_id"]]
-            for om_sec in omitted_sections: # nothing gets skipped if omitted_sections = []
-                if snote.OnsetInBeats > om_sec["start_in_beats_unfolded"] and snote.OnsetInBeats < om_sec["end_in_beats_unfolded"]:
-                    skip_deletion = True
-                    break
+            if version > Version(1,0,0):
+                for om_sec in omitted_sections: # nothing gets skipped if omitted_sections = []
+                    if snote.OnsetInBeats > om_sec["start_in_beats_unfolded"] and snote.OnsetInBeats < om_sec["end_in_beats_unfolded"]:
+                        skip_deletion = True
+                        break
                 
             if not skip_deletion:
                 if al_note["score_id"] in voice_overlap_note_ids:
                     snote.ScoreAttributesList.append("voice_overlap")
+                if version > Version(1, 0, 0):
+                    attributes_list = al_note.get("score_attributes_list", [])
+                    snote.ScoreAttributesList += attributes_list
                 deletion_line = MatchSnoteDeletion(version=version, snote=snote)
                 note_lines.append(deletion_line)
-                if version == Version(1, 0, 0):
-                    sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_stime.append(snote_sort_info[al_note["score_id"]])
+                sort_ptime.append(mapped_snote_sort_info[al_note["score_id"]])
+                    
 
         elif label == "insertion":
             note = perf_info[al_note["performance_id"]]
             insertion_line = MatchInsertionNote(version=version, note=note)
             note_lines.append(insertion_line)
-            if version == Version(1, 0, 0):
-                sort_stime.append(pnote_sort_info[al_note["performance_id"]])
+            sort_stime.append(mapped_pnote_sort_info[al_note["performance_id"]])
+            sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+
 
         elif label == "ornament":
             ornament_type = al_note["type"]
@@ -597,8 +595,10 @@ def matchfile_from_alignment(
             )
 
             note_lines.append(ornament_line)
-            if version == Version(1, 0, 0):
-                sort_stime.append(pnote_sort_info[al_note["performance_id"]])
+            sort_stime.append(mapped_pnote_sort_info[al_note["performance_id"]])
+            sort_ptime.append(pnote_sort_info[al_note["performance_id"]])
+            
+                
 
     if version > Version(1, 0, 0):
         section_lines, omitted_section_lines = [], []
@@ -628,16 +628,21 @@ def matchfile_from_alignment(
             )
             omitted_section_lines.append(omitted_section_line)
 
-    
-    if version == Version(1, 0, 0):
-        # sort notes by score onset (performed insertions are sorted
-        # according to the interpolation map
-        sort_stime = np.array(sort_stime)
-        sort_stime_idx = np.lexsort((sort_stime[:, 1], sort_stime[:, 0]))
-        note_lines = np.array(note_lines)[sort_stime_idx]
-    # Note: The alignment list is deliberately left unsorted for version > Version(1,0,0). 
-    # Sorting by performance time or score time destroys the alignment algorithm's original pathing, 
-    # tearing deletions away from their logical context and breaking structural repeats.
+    if sort_alignment:
+        if sort_alignment == "ptime":
+            sort_time = np.array(sort_ptime)
+        elif sort_alignment == "stime":
+            # sort notes by score onset (performed insertions are sorted
+            # according to the interpolation map
+            sort_time = np.array(sort_stime)
+        else:
+            raise ValueError(
+                f"Invalid sort_alignment value: '{sort_alignment}'. "
+                "Expected 'ptime', 'stime', or 'default'."
+            )
+
+        sort_time_idx = np.lexsort((sort_time[:, 1], sort_time[:, 0]))
+        note_lines = np.array(note_lines)[sort_time_idx]
 
     # Create match lines for pedal information
     pedal_lines = []
@@ -701,6 +706,7 @@ def save_match(
     version: tuple = (LATEST_VERSION.major, LATEST_VERSION.minor, LATEST_VERSION.patch),
     sections: Optional[List[dict]] = [],
     omitted_sections: Optional[List[dict]] = [],
+    sort_alignment: Optional[Union[str, bool]] = "default",
 ) -> Optional[MatchFile]:
     """
     Save an Alignment of a PerformedPart to a Part in a match file.
@@ -740,10 +746,12 @@ def save_match(
     version: tuple: (major, minor, patch)
         Version of the match file. For now only versions higher or equal to 1.0.0 are supported.
     sections : list of dict or None
-        List of sections: each dict with 'id', 'start_beats_unfolded', etc.
+        List of sections: each dict with 'id', 'start_in_beats_unfolded', etc.
     omitted_sections : list of dict or None
         List of omitted sections.
-
+    sort_alignment : str, bool, or None, optional
+        Chronological alignment sorting method: "ptime" (performance time), "stime" (score time), 
+        "default" ("ptime" if version > 1.0.0, else "stime"), or False/None (keep original order).
     Returns
     -------
     matchfile: MatchFile
@@ -791,6 +799,7 @@ def save_match(
         version=Version(version[0], version[1], version[2]),
         sections=sections,
         omitted_sections=omitted_sections,
+        sort_alignment=sort_alignment,
     )
 
     if out is not None:
