@@ -320,7 +320,11 @@ def read_harmony_tsv(beat_tsv_path, part):
 
 
 def load_dcml(
-    note_tsv_path, measure_tsv_path=None, harmony_tsv_path=None, metadata=None, quiet: bool = False
+    note_tsv_path,
+    measure_tsv_path=None,
+    harmony_tsv_path=None,
+    metadata=None,
+    quiet: bool = False,
 ):
     """
     Load a score from tsv files containing the notes, measures and harmony annotations.

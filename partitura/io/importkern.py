@@ -382,7 +382,9 @@ def load_kern(
             else:
                 # If the part does not exist, create a new part
                 has_staff = np.char.startswith(spline, "*staff")
-                staff = int(spline[has_staff][0][6:]) if np.count_nonzero(has_staff) else 1
+                staff = (
+                    int(spline[has_staff][0][6:]) if np.count_nonzero(has_staff) else 1
+                )
                 parser.staff = staff
                 prev_staff = staff
                 parser.voice = 1

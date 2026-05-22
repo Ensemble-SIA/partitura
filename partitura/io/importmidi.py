@@ -107,7 +107,7 @@ def load_performance_midi(
     with ctx:
         if quiet:
             warnings.simplefilter("ignore")
-    
+
         if isinstance(filename, mido.MidiFile):
             mid = filename
             doc_name = filename.filename
@@ -285,7 +285,9 @@ def load_performance_midi(
             # adjust timing of events based on tempo changes
             for note in notes:
                 note["note_on"] = adjust_time(note["note_on_tick"], tempo_changes, ppq)
-                note["note_off"] = adjust_time(note["note_off_tick"], tempo_changes, ppq)
+                note["note_off"] = adjust_time(
+                    note["note_off_tick"], tempo_changes, ppq
+                )
             for control in controls:
                 control["time"] = adjust_time(control["time_tick"], tempo_changes, ppq)
             for program in programs:
@@ -534,7 +536,11 @@ or a list of these
 
                         # append the note to the list associated with the channel
                         notes[msg.channel].append(
-                            (sounding_notes[note][0], msg.note, t - sounding_notes[note][0])
+                            (
+                                sounding_notes[note][0],
+                                msg.note,
+                                t - sounding_notes[note][0],
+                            )
                         )
                         # sounding_notes[note][1]])
                         # remove hash from dict

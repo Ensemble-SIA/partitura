@@ -237,7 +237,9 @@ def load_match(
         ppart = performed_part_from_match(mf, pedal_threshold, first_note_at_zero)
 
         performance = Performance(
-            id=get_document_name(filename), performedparts=ppart, ensure_unique_tracks=False
+            id=get_document_name(filename),
+            performedparts=ppart,
+            ensure_unique_tracks=False,
         )
         # Generate Part
         if create_score:

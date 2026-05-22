@@ -168,7 +168,8 @@ or a list of these
             if ps.returncode != 0:
                 raise FileImportException(
                     (
-                        "Command {} failed with code {}. MuseScore " "error messages:\n {}"
+                        "Command {} failed with code {}. MuseScore "
+                        "error messages:\n {}"
                     ).format(cmd, ps.returncode, ps.stderr.decode("UTF-8"))
                 )
         except FileNotFoundError as f:
