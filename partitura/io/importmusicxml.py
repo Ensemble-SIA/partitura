@@ -5,6 +5,7 @@ This module contains methods for importing MusicXML files.
 """
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import warnings
@@ -13,6 +14,7 @@ import zipfile
 from typing import Union, Optional, List
 import numpy as np
 from lxml import etree
+from collections import defaultdict
 
 # lxml does XSD validation too but has problems with the MusicXML 3.1 XSD, so we use
 # the xmlschema package for validating MusicXML against the definition
@@ -198,6 +200,7 @@ def load_musicxml(
     validate: bool = False,
     force_note_ids: Optional[Union[bool, str]] = None,
     ignore_invisible_objects: bool = False,
+    quiet: bool = False,
 ) -> score.Score:
     """Parse a MusicXML file and build a composite score ontology
     structure from it (see also scoreontology.py).
@@ -219,6 +222,9 @@ def load_musicxml(
     ignore_invisible_objects : bool, optional
         When True, objects that with the attribute `print-object="no"`
         will be ignored. Defaults to False.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -226,143 +232,147 @@ def load_musicxml(
         A `Score` instance.
 
     """
-    # NOTE: raising warning for ignore_invisible_objects is not ideal and it should be changed in the future
-    if ignore_invisible_objects:
-        warnings.warn(
-            "Be advised that the 'ignore_invisible_objects' option might sometimes lead "
-            "to parsing errors for unusual musicxml files. \n"
-            "Note that when ignore_invisible_objects is False (the default), the parsing works as expected as before."
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
+        # NOTE: raising warning for ignore_invisible_objects is not ideal and it should be changed in the future
+        if ignore_invisible_objects:
+            warnings.warn(
+                "Be advised that the 'ignore_invisible_objects' option might sometimes lead "
+                "to parsing errors for unusual musicxml files. \n"
+                "Note that when ignore_invisible_objects is False (the default), the parsing works as expected as before."
+            )
+
+        xml = None
+        if isinstance(filename, (str, Path)):
+            if zipfile.is_zipfile(filename):
+                with zipfile.ZipFile(filename) as zipped_xml:
+                    with zipped_xml.open("META-INF/container.xml") as container:
+                        container_tree = etree.parse(container)
+                        contained_xml_name = container_tree.find(".//rootfile").get(
+                            "full-path"
+                        )
+                    xml = zipped_xml.open(contained_xml_name)
+
+        if xml is None:
+            xml = filename
+
+        if validate:
+            validate_musicxml(xml, debug=True)
+            # if xml is a file-like object we need to set the read pointer to the
+            # start of the file for parsing
+            if hasattr(xml, "seek"):
+                xml.seek(0)
+
+        parser = etree.XMLParser(
+            resolve_entities=False,
+            huge_tree=False,
+            remove_comments=True,
+            remove_blank_text=True,
+        )
+        document = etree.parse(xml, parser)
+
+        if document.getroot().tag != "score-partwise":
+            raise Exception("Currently only score-partwise structure is supported")
+
+        partlist_el = document.find("part-list")
+
+        if partlist_el is not None:
+            # parse the (hierarchical) structure of score parts
+            # (instruments) that are listed in the part-list element
+            partlist, part_dict = _parse_partlist(partlist_el)
+            # Go through each <part> to obtain the content of the parts.
+            # The Part instances will be modified in place
+            _parse_parts(
+                document, part_dict, ignore_invisible_objects=ignore_invisible_objects
+            )
+        else:
+            partlist = []
+
+        if force_note_ids is True or force_note_ids == "keep":
+            assign_note_ids(partlist, force_note_ids == "keep")
+
+        composer = None
+        scid = None
+        work_title = None
+        work_number = None
+        movement_title = None
+        movement_number = None
+        title = None
+        subtitle = None
+        lyricist = None
+        copyright = None
+
+        # The work tag is preferred for the title of the score, otherwise
+        # this method will search in the credit tags
+        work_info_el = document.find("work")
+
+        if work_info_el is not None:
+            scid = get_value_from_tag(
+                e=work_info_el,
+                tag="work-title",
+                as_type=str,
+            )
+            scidn = get_value_from_tag(
+                e=work_info_el,
+                tag="work-number",
+                as_type=str,
+            )
+            work_title = scid
+            work_number = scidn
+
+        movement_title_el = document.find(".//movement-title")
+        movement_number_el = document.find(".//movement-number")
+        if movement_title_el is not None:
+            movement_title = movement_title_el.text
+        if movement_number_el is not None:
+            movement_number = movement_number_el.text
+
+        score_identification_el = document.find("identification")
+
+        # The identification tag has preference over credit
+        if score_identification_el is not None:
+            copyright = get_value_from_tag(score_identification_el, "rights", str)
+
+            for cel in score_identification_el.findall("creator"):
+                if get_value_from_attribute(cel, "type", str) == "composer":
+                    composer = str(cel.text)
+                if get_value_from_attribute(cel, "type", str) == "lyricist":
+                    lyricist = str(cel.text)
+
+        for cel in document.findall("credit"):
+            credit_type = get_value_from_tag(cel, "credit-type", str)
+            if credit_type == "title" and title is None:
+                title = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "subtitle" and subtitle is None:
+                subtitle = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "composer" and composer is None:
+                composer = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "lyricist" and lyricist is None:
+                lyricist = get_value_from_tag(cel, "credit-words", str)
+
+            elif credit_type == "rights" and copyright is None:
+                copyright = get_value_from_tag(cel, "credit-words", str)
+
+        scr = score.Score(
+            id=scid,
+            partlist=partlist,
+            work_number=work_number,
+            work_title=work_title,
+            movement_number=movement_number,
+            movement_title=movement_title,
+            title=title,
+            subtitle=subtitle,
+            composer=composer,
+            lyricist=lyricist,
+            copyright=copyright,
         )
 
-    xml = None
-    if isinstance(filename, (str, Path)):
-        if zipfile.is_zipfile(filename):
-            with zipfile.ZipFile(filename) as zipped_xml:
-                with zipped_xml.open("META-INF/container.xml") as container:
-                    container_tree = etree.parse(container)
-                    contained_xml_name = container_tree.find(".//rootfile").get(
-                        "full-path"
-                    )
-                xml = zipped_xml.open(contained_xml_name)
-
-    if xml is None:
-        xml = filename
-
-    if validate:
-        validate_musicxml(xml, debug=True)
-        # if xml is a file-like object we need to set the read pointer to the
-        # start of the file for parsing
-        if hasattr(xml, "seek"):
-            xml.seek(0)
-
-    parser = etree.XMLParser(
-        resolve_entities=False,
-        huge_tree=False,
-        remove_comments=True,
-        remove_blank_text=True,
-    )
-    document = etree.parse(xml, parser)
-
-    if document.getroot().tag != "score-partwise":
-        raise Exception("Currently only score-partwise structure is supported")
-
-    partlist_el = document.find("part-list")
-
-    if partlist_el is not None:
-        # parse the (hierarchical) structure of score parts
-        # (instruments) that are listed in the part-list element
-        partlist, part_dict = _parse_partlist(partlist_el)
-        # Go through each <part> to obtain the content of the parts.
-        # The Part instances will be modified in place
-        _parse_parts(
-            document, part_dict, ignore_invisible_objects=ignore_invisible_objects
-        )
-    else:
-        partlist = []
-
-    if force_note_ids is True or force_note_ids == "keep":
-        assign_note_ids(partlist, force_note_ids == "keep")
-
-    composer = None
-    scid = None
-    work_title = None
-    work_number = None
-    movement_title = None
-    movement_number = None
-    title = None
-    subtitle = None
-    lyricist = None
-    copyright = None
-
-    # The work tag is preferred for the title of the score, otherwise
-    # this method will search in the credit tags
-    work_info_el = document.find("work")
-
-    if work_info_el is not None:
-        scid = get_value_from_tag(
-            e=work_info_el,
-            tag="work-title",
-            as_type=str,
-        )
-        scidn = get_value_from_tag(
-            e=work_info_el,
-            tag="work-number",
-            as_type=str,
-        )
-        work_title = scid
-        work_number = scidn
-
-    movement_title_el = document.find(".//movement-title")
-    movement_number_el = document.find(".//movement-number")
-    if movement_title_el is not None:
-        movement_title = movement_title_el.text
-    if movement_number_el is not None:
-        movement_number = movement_number_el.text
-
-    score_identification_el = document.find("identification")
-
-    # The identification tag has preference over credit
-    if score_identification_el is not None:
-        copyright = get_value_from_tag(score_identification_el, "rights", str)
-
-        for cel in score_identification_el.findall("creator"):
-            if get_value_from_attribute(cel, "type", str) == "composer":
-                composer = str(cel.text)
-            if get_value_from_attribute(cel, "type", str) == "lyricist":
-                lyricist = str(cel.text)
-
-    for cel in document.findall("credit"):
-        credit_type = get_value_from_tag(cel, "credit-type", str)
-        if credit_type == "title" and title is None:
-            title = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "subtitle" and subtitle is None:
-            subtitle = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "composer" and composer is None:
-            composer = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "lyricist" and lyricist is None:
-            lyricist = get_value_from_tag(cel, "credit-words", str)
-
-        elif credit_type == "rights" and copyright is None:
-            copyright = get_value_from_tag(cel, "credit-words", str)
-
-    scr = score.Score(
-        id=scid,
-        partlist=partlist,
-        work_number=work_number,
-        work_title=work_title,
-        movement_number=movement_number,
-        movement_title=movement_title,
-        title=title,
-        subtitle=subtitle,
-        composer=composer,
-        lyricist=lyricist,
-        copyright=copyright,
-    )
-
-    return scr
+        return scr
 
 
 def _parse_parts(document, part_dict, ignore_invisible_objects=False):
@@ -387,6 +397,7 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
 
         position = 0
         ongoing = {}
+        ongoing["tie_notes"] = defaultdict(dict)
         doc_order = 0
         # add new page and system at start of part
         _handle_new_page(position, part, ongoing)
@@ -402,6 +413,22 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
                 mc + 1,
                 ignore_invisible_objects,
             )
+
+        # add collected ties
+        if len(ongoing["tie_notes"]["pitches"].keys()) > 0:
+            pitches_to_check = set(ongoing["tie_notes"]["pitches"].keys())
+            for pitch_to_check in pitches_to_check:
+
+                starting_tie_dict = ongoing["tie_notes"][("start", pitch_to_check)]
+                stopping_tie_dict = ongoing["tie_notes"][("stop", pitch_to_check)]
+
+                for tie_timepoint in starting_tie_dict.keys():
+                    if tie_timepoint in stopping_tie_dict:
+                        start_note = starting_tie_dict[tie_timepoint]
+                        stop_note = stopping_tie_dict[tie_timepoint]
+                        stop_note.tie_prev = start_note
+                        start_note.tie_next = stop_note
+        del ongoing["tie_notes"]
 
         # complete unfinished endings
         for o in part.iter_all(score.Ending, mode="ending"):
@@ -586,7 +613,12 @@ def _handle_measure(
         if ignore_invisible_objects:
             print_obj = get_value_from_attribute(e, "print-object", str)
             notehead = e.find("notehead")  # Musescore mask notes with notehead="none"
-            if print_obj == "no" or (notehead is not None and notehead.text == "none"):
+            cue = e.find("cue")  # cue notes are silent
+            if (
+                print_obj == "no"
+                or (notehead is not None and notehead.text == "none")
+                or cue is not None
+            ):
                 # Still update position for invisible notes (to avoid problems with backups)
                 if e.tag == "note":
                     chord = e.find("chord")
@@ -974,6 +1006,9 @@ def _handle_direction(e, position, part, ongoing):
             # words items, so we loop:
             for child in direction_type:
                 # try to make a direction out of words
+                if child.text is None:
+                    continue
+
                 parse_result = parse_direction(child.text)
                 starting_directions.extend(parse_result)
 
@@ -1332,13 +1367,28 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     # code in handle_tuplet function)
 
     chord = e.find("chord")
+    is_grace_chord = False
     if chord is not None:
         # this note starts at the same position as the previous note, and has
         # same duration
-        assert prev_note is not None
-        position = prev_note.start.t
-        duration = prev_note.duration
-        duration_from_symbolic = prev_note.duration_from_symbolic
+        if prev_note is None:
+            # Malformed MusicXML: a <chord> child on the first note of a part
+            # (or first after a backup/forward) leaves us with no anchor to
+            # copy timing from. Warn and continue, treating this note as a
+            # standalone — better than the bare AssertionError this used to
+            # raise, which crashed the whole load.
+            warnings.warn(
+                "Found <chord> on a note with no preceding note (malformed "
+                "MusicXML); treating as a standalone note.",
+                stacklevel=2,
+            )
+        else:
+            is_grace_chord = True
+            if prev_note.is_grace_chord == False:
+                prev_note.is_grace_chord = True
+            position = prev_note.start.t
+            duration = prev_note.duration
+            duration_from_symbolic = prev_note.duration_from_symbolic
 
     articulations_e = e.find("notations/articulations")
     if articulations_e is not None:
@@ -1389,6 +1439,7 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
                 steal_proportion=steal_proportion,
                 doc_order=doc_order,
                 stem_direction=stem_dir,
+                is_grace_chord=is_grace_chord,
             )
             if isinstance(prev_note, score.GraceNote) and prev_note.voice == voice:
                 note.grace_prev = prev_note
@@ -1427,6 +1478,7 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
                 technical=technical_notations,
                 doc_order=doc_order,
                 stem_direction=stem_dir,
+                is_grace_chord=is_grace_chord,
             )
 
         if isinstance(prev_note, score.GraceNote) and prev_note.voice == voice:
@@ -1479,19 +1531,16 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
 
     ties = e.findall("tie")
     if len(ties) > 0:
-        tie_key = ("tie", getattr(note, "midi_pitch", "rest"))
         tie_types = set(tie.attrib["type"] for tie in ties)
+        tie_pitch = getattr(note, "midi_pitch", "rest")
+        # roundabout way of collecting the pitches
+        ongoing["tie_notes"]["pitches"][tie_pitch] = None
 
         if "stop" in tie_types:
-            tie_prev = ongoing.get(tie_key, None)
-
-            if tie_prev:
-                note.tie_prev = tie_prev
-                tie_prev.tie_next = note
-                del ongoing[tie_key]
+            ongoing["tie_notes"][("stop", tie_pitch)][position] = note
 
         if "start" in tie_types:
-            ongoing[tie_key] = note
+            ongoing["tie_notes"][("start", tie_pitch)][position + duration] = note
 
     notations = e.find("notations")
 

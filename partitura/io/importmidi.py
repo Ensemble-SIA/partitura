@@ -5,8 +5,8 @@ This module contains methods for importing MIDI files.
 """
 
 import warnings
-
 from collections import defaultdict
+from contextlib import nullcontext
 from operator import itemgetter
 from typing import Union, Optional, List, Tuple, Dict
 import numpy as np
@@ -74,6 +74,7 @@ def load_performance_midi(
     filename: Union[PathLike, mido.MidiFile],
     default_bpm: Union[int, float] = 120,
     merge_tracks: bool = False,
+    quiet: bool = False,
 ) -> performance.Performance:
     """Load a musical performance from a MIDI file.
 
@@ -102,224 +103,230 @@ def load_performance_midi(
     :class:`partitura.performance.Performance`
         A Performance instance.
     """
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
 
-    if isinstance(filename, mido.MidiFile):
-        mid = filename
-        doc_name = filename.filename
-    else:
-        mid = mido.MidiFile(filename)
-        doc_name = get_document_name(filename)
+        if isinstance(filename, mido.MidiFile):
+            mid = filename
+            doc_name = filename.filename
+        else:
+            mid = mido.MidiFile(filename)
+            doc_name = get_document_name(filename)
 
-    # parts per quarter
-    ppq = mid.ticks_per_beat
-    # microseconds per quarter
-    default_mpq = int(60 * (10**6 / default_bpm))
-    # Initialize time conversion factor
-    time_conversion_factor = default_mpq / (ppq * 10**6)
+        # parts per quarter
+        ppq = mid.ticks_per_beat
+        # microseconds per quarter
+        default_mpq = int(60 * (10**6 / default_bpm))
+        # Initialize time conversion factor
+        time_conversion_factor = default_mpq / (ppq * 10**6)
 
-    # Initialize list of tempos
-    tempo_changes = [(0, default_mpq)]
+        # Initialize list of tempos
+        tempo_changes = [(0, default_mpq)]
 
-    pps = list()
+        pps = list()
 
-    if merge_tracks:
-        mid_merge = mido.merge_tracks(mid.tracks)
-        tracks = [(0, mid_merge)]
-    else:
-        tracks = [(i, u) for i, u in enumerate(mid.tracks)]
+        if merge_tracks:
+            mid_merge = mido.merge_tracks(mid.tracks)
+            tracks = [(0, mid_merge)]
+        else:
+            tracks = [(i, u) for i, u in enumerate(mid.tracks)]
 
-    for i, track in tracks:
-        notes = []
-        controls = []
-        programs = []
-        # This information is just for completeness,
-        # but loading a MIDI file as a performance
-        # assumes that key and time signature information
-        # is not reliable (e.g., a performance recorded with
-        # a MIDI keyboard, without metronome)
-        key_signatures = []
-        time_signatures = []
-        # other MetaMessages (not including key and time_signature)
-        meta_other = []
+        for i, track in tracks:
+            notes = []
+            controls = []
+            programs = []
+            # This information is just for completeness,
+            # but loading a MIDI file as a performance
+            # assumes that key and time signature information
+            # is not reliable (e.g., a performance recorded with
+            # a MIDI keyboard, without metronome)
+            key_signatures = []
+            time_signatures = []
+            # other MetaMessages (not including key and time_signature)
+            meta_other = []
 
-        t = 0
-        ttick = 0
+            t = 0
+            ttick = 0
 
-        sounding_notes = {}
+            sounding_notes = {}
 
-        for msg in track:
-            # Update time deltas
-            t += msg.time * time_conversion_factor
-            ttick += msg.time
+            for msg in track:
+                # Update time deltas
+                t += msg.time * time_conversion_factor
+                ttick += msg.time
 
-            if isinstance(msg, mido.MetaMessage):
-                if msg.type == "set_tempo":
-                    mpq = msg.tempo
-                    if (
-                        tempo_changes[-1][1] != mpq
-                    ):  # only add new tempo if it's different from the last one
-                        tempo_changes.append((ttick, mpq))
-                    time_conversion_factor = mpq / (ppq * 10**6)
-                elif msg.type == "time_signature":
-                    time_signatures.append(
+                if isinstance(msg, mido.MetaMessage):
+                    if msg.type == "set_tempo":
+                        mpq = msg.tempo
+                        if (
+                            tempo_changes[-1][1] != mpq
+                        ):  # only add new tempo if it's different from the last one
+                            tempo_changes.append((ttick, mpq))
+                        time_conversion_factor = mpq / (ppq * 10**6)
+                    elif msg.type == "time_signature":
+                        time_signatures.append(
+                            dict(
+                                time=t,
+                                time_tick=ttick,
+                                beats=int(msg.numerator),
+                                beat_type=int(msg.denominator),
+                                track=i,
+                            )
+                        )
+                    elif msg.type == "key_signature":
+                        key_name = str(msg.key)
+                        fifths, mode = key_name_to_fifths_mode(key_name)
+                        key_signatures.append(
+                            dict(
+                                time=t,
+                                time_tick=ttick,
+                                key_name=str(msg.key),
+                                fifths=fifths,
+                                mode=mode,
+                                track=i,
+                            )
+                        )
+
+                    else:
+                        # Other MetaMessages
+                        # For more info, see
+                        # https://mido.readthedocs.io/en/latest/meta_message_types.html
+                        msg_dict = dict(
+                            [
+                                ("time", t),
+                                ("time_tick", ttick),
+                                ("track", i),
+                            ]
+                            + [
+                                (key, val)
+                                for key, val in msg.__dict__.items()
+                                if key not in ("time", "track", "time_tick")
+                            ]
+                        )
+
+                        meta_other.append(msg_dict)
+
+                elif msg.type == "control_change":
+                    controls.append(
                         dict(
                             time=t,
                             time_tick=ttick,
-                            beats=int(msg.numerator),
-                            beat_type=int(msg.denominator),
+                            number=msg.control,
+                            value=msg.value,
                             track=i,
+                            channel=msg.channel,
                         )
                     )
-                elif msg.type == "key_signature":
-                    key_name = str(msg.key)
-                    fifths, mode = key_name_to_fifths_mode(key_name)
-                    key_signatures.append(
+
+                elif msg.type == "program_change":
+                    programs.append(
                         dict(
                             time=t,
                             time_tick=ttick,
-                            key_name=str(msg.key),
-                            fifths=fifths,
-                            mode=mode,
+                            program=msg.program,
                             track=i,
+                            channel=msg.channel,
                         )
                     )
 
                 else:
-                    # Other MetaMessages
-                    # For more info, see
-                    # https://mido.readthedocs.io/en/latest/meta_message_types.html
-                    msg_dict = dict(
-                        [
-                            ("time", t),
-                            ("time_tick", ttick),
-                            ("track", i),
-                        ]
-                        + [
-                            (key, val)
-                            for key, val in msg.__dict__.items()
-                            if key not in ("time", "track", "time_tick")
-                        ]
-                    )
+                    note_on = msg.type == "note_on"
+                    note_off = msg.type == "note_off"
 
-                    meta_other.append(msg_dict)
-
-            elif msg.type == "control_change":
-                controls.append(
-                    dict(
-                        time=t,
-                        time_tick=ttick,
-                        number=msg.control,
-                        value=msg.value,
-                        track=i,
-                        channel=msg.channel,
-                    )
-                )
-
-            elif msg.type == "program_change":
-                programs.append(
-                    dict(
-                        time=t,
-                        time_tick=ttick,
-                        program=msg.program,
-                        track=i,
-                        channel=msg.channel,
-                    )
-                )
-
-            else:
-                note_on = msg.type == "note_on"
-                note_off = msg.type == "note_off"
-
-                if not (note_on or note_off):
-                    continue
-
-                # hash sounding note
-                note = note_hash(msg.channel, msg.note)
-
-                # start note if it's a 'note on' event with velocity > 0
-                if note_on and msg.velocity > 0:
-                    # save the onset time and velocity
-                    sounding_notes[note] = (t, ttick, msg.velocity)
-
-                # end note if it's a 'note off' event or 'note on' with velocity 0
-                elif note_off or (note_on and msg.velocity == 0):
-                    if note not in sounding_notes:
-                        warnings.warn(f"ignoring MIDI message {msg}")
+                    if not (note_on or note_off):
                         continue
 
-                    # append the note to the list associated with the channel
-                    notes.append(
-                        dict(
-                            # id=f"n{len(notes)}",
-                            midi_pitch=msg.note,
-                            note_on=(sounding_notes[note][0]),
-                            note_on_tick=(sounding_notes[note][1]),
-                            note_off=(t),
-                            note_off_tick=(ttick),
-                            track=i,
-                            channel=msg.channel,
-                            velocity=sounding_notes[note][2],
+                    # hash sounding note
+                    note = note_hash(msg.channel, msg.note)
+
+                    # start note if it's a 'note on' event with velocity > 0
+                    if note_on and msg.velocity > 0:
+                        # save the onset time and velocity
+                        sounding_notes[note] = (t, ttick, msg.velocity)
+
+                    # end note if it's a 'note off' event or 'note on' with velocity 0
+                    elif note_off or (note_on and msg.velocity == 0):
+                        if note not in sounding_notes:
+                            warnings.warn(f"ignoring MIDI message {msg}")
+                            continue
+
+                        # append the note to the list associated with the channel
+                        notes.append(
+                            dict(
+                                # id=f"n{len(notes)}",
+                                midi_pitch=msg.note,
+                                note_on=(sounding_notes[note][0]),
+                                note_on_tick=(sounding_notes[note][1]),
+                                note_off=(t),
+                                note_off_tick=(ttick),
+                                track=i,
+                                channel=msg.channel,
+                                velocity=sounding_notes[note][2],
+                            )
                         )
-                    )
 
-                    # remove hash from dict
-                    del sounding_notes[note]
+                        # remove hash from dict
+                        del sounding_notes[note]
 
-        # fix note ids so that it is sorted lexicographically
-        # by onset, pitch, offset, channel and track
-        notes.sort(
-            key=lambda x: (
-                x["note_on"],
-                x["midi_pitch"],
-                x["note_off"],
-                x["channel"],
-                x["track"],
+            # fix note ids so that it is sorted lexicographically
+            # by onset, pitch, offset, channel and track
+            notes.sort(
+                key=lambda x: (
+                    x["note_on"],
+                    x["midi_pitch"],
+                    x["note_off"],
+                    x["channel"],
+                    x["track"],
+                )
             )
+
+            # adjust timing of events based on tempo changes
+            for note in notes:
+                note["note_on"] = adjust_time(note["note_on_tick"], tempo_changes, ppq)
+                note["note_off"] = adjust_time(
+                    note["note_off_tick"], tempo_changes, ppq
+                )
+            for control in controls:
+                control["time"] = adjust_time(control["time_tick"], tempo_changes, ppq)
+            for program in programs:
+                program["time"] = adjust_time(program["time_tick"], tempo_changes, ppq)
+            for time_signature in time_signatures:
+                time_signature["time"] = adjust_time(
+                    time_signature["time_tick"], tempo_changes, ppq
+                )
+            for key_signature in key_signatures:
+                key_signature["time"] = adjust_time(
+                    key_signature["time_tick"], tempo_changes, ppq
+                )
+            for meta in meta_other:
+                meta["time"] = adjust_time(meta["time_tick"], tempo_changes, ppq)
+
+            # add note id to every note
+            for k, note in enumerate(notes):
+                note["id"] = f"n{k}"
+
+            if len(notes) > 0 or len(controls) > 0 or len(programs) > 0:
+                pp = performance.PerformedPart(
+                    notes,
+                    controls=controls,
+                    programs=programs,
+                    key_signatures=key_signatures,
+                    time_signatures=time_signatures,
+                    meta_other=meta_other,
+                    ppq=ppq,
+                    mpq=default_mpq,
+                    track=i,
+                )
+                pps.append(pp)
+
+        perf = performance.Performance(
+            id=doc_name,
+            performedparts=pps,
         )
 
-        # adjust timing of events based on tempo changes
-        for note in notes:
-            note["note_on"] = adjust_time(note["note_on_tick"], tempo_changes, ppq)
-            note["note_off"] = adjust_time(note["note_off_tick"], tempo_changes, ppq)
-        for control in controls:
-            control["time"] = adjust_time(control["time_tick"], tempo_changes, ppq)
-        for program in programs:
-            program["time"] = adjust_time(program["time_tick"], tempo_changes, ppq)
-        for time_signature in time_signatures:
-            time_signature["time"] = adjust_time(
-                time_signature["time_tick"], tempo_changes, ppq
-            )
-        for key_signature in key_signatures:
-            key_signature["time"] = adjust_time(
-                key_signature["time_tick"], tempo_changes, ppq
-            )
-        for meta in meta_other:
-            meta["time"] = adjust_time(meta["time_tick"], tempo_changes, ppq)
-
-        # add note id to every note
-        for k, note in enumerate(notes):
-            note["id"] = f"n{k}"
-
-        if len(notes) > 0 or len(controls) > 0 or len(programs) > 0:
-            pp = performance.PerformedPart(
-                notes,
-                controls=controls,
-                programs=programs,
-                key_signatures=key_signatures,
-                time_signatures=time_signatures,
-                meta_other=meta_other,
-                ppq=ppq,
-                mpq=default_mpq,
-                track=i,
-            )
-            pps.append(pp)
-
-    perf = performance.Performance(
-        id=doc_name,
-        performedparts=pps,
-    )
-
-    return perf
+        return perf
 
 
 def adjust_time(tick: int, tempo_changes: List[Tuple[int, int]], ppq: int) -> float:
@@ -364,6 +371,7 @@ def load_score_midi(
     estimate_voice_info: bool = False,
     estimate_key: bool = False,
     assign_note_ids: bool = True,
+    quiet: bool = False,
 ) -> score.Score:
     """Load a musical score from a MIDI file and return it as a Part
     instance.
@@ -438,264 +446,276 @@ or a list of these
     .. [3] Krumhansl, Carol L. (1990) "Cognitive foundations of musical pitch",
            Oxford University Press, New York.
 
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
     """
 
-    if isinstance(filename, mido.MidiFile):
-        mid = filename
-        doc_name = filename.filename
-    else:
-        mid = mido.MidiFile(filename)
-        doc_name = get_document_name(filename)
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
 
-    divs = mid.ticks_per_beat
+        if isinstance(filename, mido.MidiFile):
+            mid = filename
+            doc_name = filename.filename
+        else:
+            mid = mido.MidiFile(filename)
+            doc_name = get_document_name(filename)
 
-    # these lists will contain information from dedicated tracks for meta
-    # information (i.e. without notes)
-    global_time_sigs = []
-    global_key_sigs = []
-    global_tempos = []
+        divs = mid.ticks_per_beat
 
-    # these dictionaries will contain meta information indexed by track (only
-    # for tracks that contain notes)
-    time_sigs_by_track = {}
-    key_sigs_by_track = {}
-    track_names_by_track = {}
-    # notes are indexed by (track, channel) tuples
-    notes_by_track_ch = {}
-    relevant = {
-        "time_signature",
-        "key_signature",
-        "set_tempo",
-        "note_on",
-        "note_off",
-    }
-    for track_nr, track in enumerate(mid.tracks):
-        time_sigs = []
-        key_sigs = []
-        # tempos = []
-        notes = defaultdict(list)
-        # dictionary for storing the last onset time and velocity for each
-        # individual note (i.e. same pitch and channel)
-        sounding_notes = {}
-        # current time (will be updated by delta times in messages)
-        t_raw = 0
+        # these lists will contain information from dedicated tracks for meta
+        # information (i.e. without notes)
+        global_time_sigs = []
+        global_key_sigs = []
+        global_tempos = []
 
-        for msg in track:
-            t_raw = t_raw + msg.time
+        # these dictionaries will contain meta information indexed by track (only
+        # for tracks that contain notes)
+        time_sigs_by_track = {}
+        key_sigs_by_track = {}
+        track_names_by_track = {}
+        # notes are indexed by (track, channel) tuples
+        notes_by_track_ch = {}
+        relevant = {
+            "time_signature",
+            "key_signature",
+            "set_tempo",
+            "note_on",
+            "note_off",
+        }
+        for track_nr, track in enumerate(mid.tracks):
+            time_sigs = []
+            key_sigs = []
+            # tempos = []
+            notes = defaultdict(list)
+            # dictionary for storing the last onset time and velocity for each
+            # individual note (i.e. same pitch and channel)
+            sounding_notes = {}
+            # current time (will be updated by delta times in messages)
+            t_raw = 0
 
-            if msg.type not in relevant:
-                continue
+            for msg in track:
+                t_raw = t_raw + msg.time
 
-            if quantization_unit:
-                t = quantize(t_raw, quantization_unit)
-            else:
-                t = t_raw
-
-            if msg.type == "time_signature":
-                time_sigs.append((t, msg.numerator, msg.denominator))
-            if msg.type == "key_signature":
-                key_sigs.append((t, msg.key))
-            if msg.type == "set_tempo":
-                global_tempos.append((t, 60 * 10**6 / msg.tempo))
-            else:
-                note_on = msg.type == "note_on"
-                note_off = msg.type == "note_off"
-
-                if not (note_on or note_off):
+                if msg.type not in relevant:
                     continue
 
-                # hash sounding note
-                note = note_hash(msg.channel, msg.note)
+                if quantization_unit:
+                    t = quantize(t_raw, quantization_unit)
+                else:
+                    t = t_raw
 
-                # start note if it's a 'note on' event with velocity > 0
-                if note_on and msg.velocity > 0:
-                    # save the onset time and velocity
-                    sounding_notes[note] = (t, msg.velocity)
+                if msg.type == "time_signature":
+                    time_sigs.append((t, msg.numerator, msg.denominator))
+                if msg.type == "key_signature":
+                    key_sigs.append((t, msg.key))
+                if msg.type == "set_tempo":
+                    global_tempos.append((t, 60 * 10**6 / msg.tempo))
+                else:
+                    note_on = msg.type == "note_on"
+                    note_off = msg.type == "note_off"
 
-                # end note if it's a 'note off' event or 'note on' with velocity 0
-                elif note_off or (note_on and msg.velocity == 0):
-                    if note not in sounding_notes:
-                        warnings.warn("ignoring MIDI message %s" % msg)
+                    if not (note_on or note_off):
                         continue
 
-                    # append the note to the list associated with the channel
-                    notes[msg.channel].append(
-                        (sounding_notes[note][0], msg.note, t - sounding_notes[note][0])
-                    )
-                    # sounding_notes[note][1]])
-                    # remove hash from dict
-                    del sounding_notes[note]
+                    # hash sounding note
+                    note = note_hash(msg.channel, msg.note)
 
-        # if a track has no notes, we assume it may contain global time/key sigs
-        if not notes:
-            global_time_sigs.extend(time_sigs)
-            global_key_sigs.extend(key_sigs)
-        else:
-            # if there are note, we store the info under the track number
-            time_sigs_by_track[track_nr] = time_sigs
-            key_sigs_by_track[track_nr] = key_sigs
-            track_names_by_track[track_nr] = track.name
+                    # start note if it's a 'note on' event with velocity > 0
+                    if note_on and msg.velocity > 0:
+                        # save the onset time and velocity
+                        sounding_notes[note] = (t, msg.velocity)
 
-        for ch, ch_notes in notes.items():
-            # if there are any notes, store the notes along with key sig / time
-            # sig / tempo information under the key (track_nr, ch_nr)
-            if len(ch_notes) > 0:
-                notes_by_track_ch[(track_nr, ch)] = ch_notes
+                    # end note if it's a 'note off' event or 'note on' with velocity 0
+                    elif note_off or (note_on and msg.velocity == 0):
+                        if note not in sounding_notes:
+                            warnings.warn("ignoring MIDI message %s" % msg)
+                            continue
 
-    tr_ch_keys = sorted(notes_by_track_ch.keys())
-    group_part_voice_keys, part_names, group_names = assign_group_part_voice(
-        part_voice_assign_mode, tr_ch_keys, track_names_by_track
-    )
+                        # append the note to the list associated with the channel
+                        notes[msg.channel].append(
+                            (
+                                sounding_notes[note][0],
+                                msg.note,
+                                t - sounding_notes[note][0],
+                            )
+                        )
+                        # sounding_notes[note][1]])
+                        # remove hash from dict
+                        del sounding_notes[note]
 
-    # for key and time sigs:
-    track_to_part_mapping = make_track_to_part_mapping(
-        tr_ch_keys, group_part_voice_keys
-    )
+            # if a track has no notes, we assume it may contain global time/key sigs
+            if not notes:
+                global_time_sigs.extend(time_sigs)
+                global_key_sigs.extend(key_sigs)
+            else:
+                # if there are note, we store the info under the track number
+                time_sigs_by_track[track_nr] = time_sigs
+                key_sigs_by_track[track_nr] = key_sigs
+                track_names_by_track[track_nr] = track.name
 
-    # pairs of (part, voice) for each note
-    part_voice_list = [
-        [part, voice]
-        for tr_ch, (_, part, voice) in zip(tr_ch_keys, group_part_voice_keys)
-        for i in range(len(notes_by_track_ch[tr_ch]))
-    ]
+            for ch, ch_notes in notes.items():
+                # if there are any notes, store the notes along with key sig / time
+                # sig / tempo information under the key (track_nr, ch_nr)
+                if len(ch_notes) > 0:
+                    notes_by_track_ch[(track_nr, ch)] = ch_notes
 
-    # pitch spelling, voice estimation and key estimation are done on a
-    # structured array (onset, pitch, duration) of all notes in the piece
-    # jointly, so we concatenate all notes
-    # note_list = sorted(note for notes in
-    # (notes_by_track_ch[key] for key in tr_ch_keys) for note in notes)
-    note_list = [
-        note
-        for notes in (notes_by_track_ch[key] for key in tr_ch_keys)
-        for note in notes
-    ]
-    note_array = np.array(
-        note_list,
-        dtype=[("onset_div", int), ("pitch", int), ("duration_div", int)],
-    )
-
-    warnings.warn("pitch spelling")
-    spelling_global = analysis.estimate_spelling(note_array)
-
-    if estimate_voice_info:
-        warnings.warn("voice estimation", stacklevel=2)
-        # TODO: deal with zero duration notes in note_array.
-        # Zero duration notes are currently deleted
-        estimated_voices = analysis.estimate_voices(note_array)
-        assert len(part_voice_list) == len(estimated_voices)
-        for part_voice, voice_est in zip(part_voice_list, estimated_voices):
-            if part_voice[1] is None:
-                part_voice[1] = voice_est
-
-    if estimate_key:
-        warnings.warn("key estimation", stacklevel=2)
-        _, mode, fifths = analysis.estimate_key(note_array)
-        key_sigs_by_track = {}
-        global_key_sigs = [(0, fifths_mode_to_key_name(fifths, mode))]
-
-    if assign_note_ids:
-        note_ids = ["n{}".format(i) for i in range(len(note_array))]
-    else:
-        note_ids = [None for i in range(len(note_array))]
-
-    ## sanitize time signature, when they are only present in one track, and no global is set
-    # find the number of ts per each track
-    number_of_time_sig_per_track = [
-        len(time_sigs_by_track[t]) for t in key_sigs_by_track.keys()
-    ]
-    # if one track has 0 ts, and another has !=0 ts, and no global_time_sigs is present, sanitize
-    # all key signatures are copied to global, and the track ts are removed
-    if (
-        len(global_time_sigs) == 0
-        and min(number_of_time_sig_per_track) == 0
-        and max(number_of_time_sig_per_track) != 0
-    ):
-        warnings.warn(
-            "Sanitizing time signatures. They will be shared across all tracks."
+        tr_ch_keys = sorted(notes_by_track_ch.keys())
+        group_part_voice_keys, part_names, group_names = assign_group_part_voice(
+            part_voice_assign_mode, tr_ch_keys, track_names_by_track
         )
-        for ts in [
-            ts for ts_track in time_sigs_by_track.values() for ts in ts_track
-        ]:  # flattening all track time signatures to a list of ts
-            global_time_sigs.append(ts)
-        # now clear all track_ts
-        time_sigs_by_track.clear()
 
-    # use a list to preserve all time sigs in order
-    time_sigs_by_part = defaultdict(list)
-    for tr, ts_list in time_sigs_by_track.items():
-        for ts in ts_list:
-            for part in track_to_part_mapping[tr]:
+        # for key and time sigs:
+        track_to_part_mapping = make_track_to_part_mapping(
+            tr_ch_keys, group_part_voice_keys
+        )
+
+        # pairs of (part, voice) for each note
+        part_voice_list = [
+            [part, voice]
+            for tr_ch, (_, part, voice) in zip(tr_ch_keys, group_part_voice_keys)
+            for i in range(len(notes_by_track_ch[tr_ch]))
+        ]
+
+        # pitch spelling, voice estimation and key estimation are done on a
+        # structured array (onset, pitch, duration) of all notes in the piece
+        # jointly, so we concatenate all notes
+        # note_list = sorted(note for notes in
+        # (notes_by_track_ch[key] for key in tr_ch_keys) for note in notes)
+        note_list = [
+            note
+            for notes in (notes_by_track_ch[key] for key in tr_ch_keys)
+            for note in notes
+        ]
+        note_array = np.array(
+            note_list,
+            dtype=[("onset_div", int), ("pitch", int), ("duration_div", int)],
+        )
+
+        warnings.warn("pitch spelling")
+        spelling_global = analysis.estimate_spelling(note_array)
+
+        if estimate_voice_info:
+            warnings.warn("voice estimation", stacklevel=2)
+            # TODO: deal with zero duration notes in note_array.
+            # Zero duration notes are currently deleted
+            estimated_voices = analysis.estimate_voices(note_array)
+            assert len(part_voice_list) == len(estimated_voices)
+            for part_voice, voice_est in zip(part_voice_list, estimated_voices):
+                if part_voice[1] is None:
+                    part_voice[1] = voice_est
+
+        if estimate_key:
+            warnings.warn("key estimation", stacklevel=2)
+            _, mode, fifths = analysis.estimate_key(note_array)
+            key_sigs_by_track = {}
+            global_key_sigs = [(0, fifths_mode_to_key_name(fifths, mode))]
+
+        if assign_note_ids:
+            note_ids = ["n{}".format(i) for i in range(len(note_array))]
+        else:
+            note_ids = [None for i in range(len(note_array))]
+
+        ## sanitize time signature, when they are only present in one track, and no global is set
+        # find the number of ts per each track
+        number_of_time_sig_per_track = [
+            len(time_sigs_by_track[t]) for t in key_sigs_by_track.keys()
+        ]
+        # if one track has 0 ts, and another has !=0 ts, and no global_time_sigs is present, sanitize
+        # all key signatures are copied to global, and the track ts are removed
+        if (
+            len(global_time_sigs) == 0
+            and min(number_of_time_sig_per_track) == 0
+            and max(number_of_time_sig_per_track) != 0
+        ):
+            warnings.warn(
+                "Sanitizing time signatures. They will be shared across all tracks."
+            )
+            for ts in [
+                ts for ts_track in time_sigs_by_track.values() for ts in ts_track
+            ]:  # flattening all track time signatures to a list of ts
+                global_time_sigs.append(ts)
+            # now clear all track_ts
+            time_sigs_by_track.clear()
+
+        # use a list to preserve all time sigs in order
+        time_sigs_by_part = defaultdict(list)
+        for tr, ts_list in time_sigs_by_track.items():
+            for ts in ts_list:
+                for part in track_to_part_mapping[tr]:
+                    time_sigs_by_part[part].append(ts)
+        for ts in global_time_sigs:
+            for part in set(part for _, part, _ in group_part_voice_keys):
                 time_sigs_by_part[part].append(ts)
-    for ts in global_time_sigs:
-        for part in set(part for _, part, _ in group_part_voice_keys):
-            time_sigs_by_part[part].append(ts)
 
-    # use a list to preserve all key sigs in order
-    key_sigs_by_part = defaultdict(list)
-    for tr, ks_list in key_sigs_by_track.items():
-        for ks in ks_list:
-            for part in track_to_part_mapping[tr]:
+        # use a list to preserve all key sigs in order
+        key_sigs_by_part = defaultdict(list)
+        for tr, ks_list in key_sigs_by_track.items():
+            for ks in ks_list:
+                for part in track_to_part_mapping[tr]:
+                    key_sigs_by_part[part].append(ks)
+        for ks in global_key_sigs:
+            for part in set(part for _, part, _ in group_part_voice_keys):
                 key_sigs_by_part[part].append(ks)
-    for ks in global_key_sigs:
-        for part in set(part for _, part, _ in group_part_voice_keys):
-            key_sigs_by_part[part].append(ks)
 
-    # names_by_part = defaultdict(set)
-    # for tr_ch, pg_p_v in zip(tr_ch_keys, group_part_voice_keys):
-    #     print(tr_ch, pg_p_v)
-    # for tr, name in track_names_by_track.items():
-    #     print(tr, track_to_part_mapping, name)
-    #     for part in track_to_part_mapping[tr]:
-    #         names_by_part[part] = name
+        # names_by_part = defaultdict(set)
+        # for tr_ch, pg_p_v in zip(tr_ch_keys, group_part_voice_keys):
+        #     print(tr_ch, pg_p_v)
+        # for tr, name in track_names_by_track.items():
+        #     print(tr, track_to_part_mapping, name)
+        #     for part in track_to_part_mapping[tr]:
+        #         names_by_part[part] = name
 
-    notes_by_part = defaultdict(list)
-    for (part, voice), note, spelling, note_id in zip(
-        part_voice_list, note_list, spelling_global, note_ids
-    ):
-        notes_by_part[part].append((note, voice, spelling, note_id))
+        notes_by_part = defaultdict(list)
+        for (part, voice), note, spelling, note_id in zip(
+            part_voice_list, note_list, spelling_global, note_ids
+        ):
+            notes_by_part[part].append((note, voice, spelling, note_id))
 
-    partlist = []
-    part_to_part_group = dict((p, pg) for pg, p, _ in group_part_voice_keys)
-    part_groups = {}
-    for part_nr, note_info in notes_by_part.items():
-        notes, voices, spellings, note_ids = zip(*note_info)
-        part = create_part(
-            divs,
-            notes,
-            spellings,
-            voices,
-            note_ids,
-            sorted(time_sigs_by_part[part_nr], key=itemgetter(0)),
-            sorted(key_sigs_by_part[part_nr], key=itemgetter(0)),
-            part_id="P{}".format(part_nr + 1),
-            part_name=part_names.get(part_nr, None),
+        partlist = []
+        part_to_part_group = dict((p, pg) for pg, p, _ in group_part_voice_keys)
+        part_groups = {}
+        for part_nr, note_info in notes_by_part.items():
+            notes, voices, spellings, note_ids = zip(*note_info)
+            part = create_part(
+                divs,
+                notes,
+                spellings,
+                voices,
+                note_ids,
+                sorted(time_sigs_by_part[part_nr], key=itemgetter(0)),
+                sorted(key_sigs_by_part[part_nr], key=itemgetter(0)),
+                part_id="P{}".format(part_nr + 1),
+                part_name=part_names.get(part_nr, None),
+            )
+            # if this part has an associated part_group number we create a PartGroup
+            # if necessary, and add the part to that. The newly created PartGroup is
+            # then added to the partlist.
+            pg_nr = part_to_part_group[part_nr]
+            if pg_nr is None:
+                partlist.append(part)
+            else:
+                if pg_nr not in part_groups:
+                    part_groups[pg_nr] = score.PartGroup(
+                        group_name=group_names.get(pg_nr, None)
+                    )
+                    partlist.append(part_groups[pg_nr])
+                part_groups[pg_nr].children.append(part)
+
+        # add tempos to first part
+        part = next(score.iter_parts(partlist))
+        for t, qpm in global_tempos:
+            part.add(score.Tempo(qpm, unit="q"), t)
+
+        # TODO: Add info (composer, etc.)
+        scr = score.Score(
+            id=doc_name,
+            partlist=partlist,
         )
-        # if this part has an associated part_group number we create a PartGroup
-        # if necessary, and add the part to that. The newly created PartGroup is
-        # then added to the partlist.
-        pg_nr = part_to_part_group[part_nr]
-        if pg_nr is None:
-            partlist.append(part)
-        else:
-            if pg_nr not in part_groups:
-                part_groups[pg_nr] = score.PartGroup(
-                    group_name=group_names.get(pg_nr, None)
-                )
-                partlist.append(part_groups[pg_nr])
-            part_groups[pg_nr].children.append(part)
 
-    # add tempos to first part
-    part = next(score.iter_parts(partlist))
-    for t, qpm in global_tempos:
-        part.add(score.Tempo(qpm, unit="q"), t)
-
-    # TODO: Add info (composer, etc.)
-    scr = score.Score(
-        id=doc_name,
-        partlist=partlist,
-    )
-
-    return scr
+        return scr
 
 
 def make_track_to_part_mapping(tr_ch_keys, group_part_voice_keys):

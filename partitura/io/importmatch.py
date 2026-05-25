@@ -5,6 +5,7 @@ This module contains methods for parsing matchfiles
 """
 
 import os
+from contextlib import nullcontext
 from typing import Union, Tuple, Optional, Callable, List
 import warnings
 from functools import partial
@@ -188,6 +189,7 @@ def load_match(
     pedal_threshold: int = 64,
     first_note_at_zero: bool = False,
     offset_duration_whole: bool = True,
+    quiet: bool = False,
 ) -> Tuple[Union[Performance, list, Score]]:
     """
     Load a matchfile.
@@ -211,6 +213,9 @@ def load_match(
         When true, the function expects the values to be given in whole
         notes (e.g. 1/4 for a quarter note) independet of time signature.
         Defaults to True.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
@@ -220,30 +225,37 @@ def load_match(
     scr : :class:partitura.score.Score
         The score. This item is only returned when `create_score` = True.
     """
-    # Parse Matchfile
-    mf = load_matchfile(filename)
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
 
-    # Generate PerformedPart
-    ppart = performed_part_from_match(mf, pedal_threshold, first_note_at_zero)
+        # Parse Matchfile
+        mf = load_matchfile(filename)
 
-    performance = Performance(
-        id=get_document_name(filename), performedparts=ppart, ensure_unique_tracks=False
-    )
-    # Generate Part
-    if create_score:
-        spart = part_from_matchfile(
-            mf,
-            match_offset_duration_in_whole=offset_duration_whole,
+        # Generate PerformedPart
+        ppart = performed_part_from_match(mf, pedal_threshold, first_note_at_zero)
+
+        performance = Performance(
+            id=get_document_name(filename),
+            performedparts=ppart,
+            ensure_unique_tracks=False,
         )
+        # Generate Part
+        if create_score:
+            spart = part_from_matchfile(
+                mf,
+                match_offset_duration_in_whole=offset_duration_whole,
+            )
 
-        scr = score.Score(id=get_document_name(filename), partlist=[spart])
-    # Alignment
-    alignment = alignment_from_matchfile(mf)
+            scr = score.Score(id=get_document_name(filename), partlist=[spart])
+        # Alignment
+        alignment = alignment_from_matchfile(mf)
 
-    if create_score:
-        return performance, alignment, scr
-    else:
-        return performance, alignment
+        if create_score:
+            return performance, alignment, scr
+        else:
+            return performance, alignment
 
 
 def note_alignment_from_matchfile(mf: MatchFile) -> List[dict]:

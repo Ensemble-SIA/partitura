@@ -28,13 +28,17 @@ except:
     VEROVIO_AVAILABLE = False
 
 import re
+from contextlib import nullcontext
 import warnings
 
 import numpy as np
 
+# Pattern to catch endings for MEI files exported from MuseScore
+MSCORE_ENDING_PATTERN = re.compile(r"mscore-ending-(\d+)")
+
 
 @deprecated_alias(mei_path="filename")
-def load_mei(filename: PathLike) -> score.Score:
+def load_mei(filename: PathLike, quiet: bool = False) -> score.Score:
     """
     Loads a Mei score from path and returns a partitura Score object.
 
@@ -42,26 +46,33 @@ def load_mei(filename: PathLike) -> score.Score:
     ----------
     filename : PathLike
         The path to an MEI score.
+    quiet : bool, optional
+        If True, suppress all warnings emitted during parsing.
+        Defaults to False.
 
     Returns
     -------
     scr: :class:`partitura.score.Score`
         A `Score` object
     """
-    parser = MeiParser(filename)
-    doc_name = get_document_name(filename)
-    # create parts from the specifications in the mei
-    parser.create_parts()
-    # fill parts with the content from the mei
-    parser.fill_parts()
+    ctx = warnings.catch_warnings() if quiet else nullcontext()
+    with ctx:
+        if quiet:
+            warnings.simplefilter("ignore")
+        parser = MeiParser(filename)
+        doc_name = get_document_name(filename)
+        # create parts from the specifications in the mei
+        parser.create_parts()
+        # fill parts with the content from the mei
+        parser.fill_parts()
 
-    # TODO: Parse score info (composer, lyricist, etc.)
-    scr = score.Score(
-        id=doc_name,
-        partlist=parser.parts,
-    )
+        # TODO: Parse score info (composer, lyricist, etc.)
+        scr = score.Score(
+            id=doc_name,
+            partlist=parser.parts,
+        )
 
-    return scr
+        return scr
 
 
 class MeiParser(object):
@@ -162,7 +173,7 @@ class MeiParser(object):
 
         if use_verovio:
             tk = verovio.toolkit(True)
-            tk.loadFile(mei_path)
+            tk.loadFile(str(mei_path))
             mei_score = tk.getMEI("basic")
             # document = etree.parse(mei_score, parser)
             root = etree.fromstring(mei_score.encode("utf-8"), parser)
@@ -405,7 +416,14 @@ class MeiParser(object):
             # there is at least one element with both dur and dur.ppq
             for dur, dppq in zip(durs, durs_ppq):
                 if dppq is not None:
-                    return dppq * dur / 4
+                    # Compute ppq using integer arithmetic to ensure a sensible integer
+                    candidate_ppq = dppq * dur
+                    if candidate_ppq % 4 == 0:
+                        ppq = candidate_ppq // 4
+                    else:
+                        ppq = int(round(candidate_ppq / 4))
+                    # Guard against non-positive or zero values
+                    return max(ppq, 1)
         else:
             # compute the ppq from the durations
             # add 4 to be sure to not go under 1 ppq
@@ -414,9 +432,10 @@ class MeiParser(object):
             # remove elements smaller than 1
             durs = durs[durs >= 1]
 
-            least_common_multiple = np.lcm.reduce(durs.astype(int))
-
-            return least_common_multiple / 4
+            least_common_multiple = int(np.lcm.reduce(durs.astype(int)))
+            # Since 4 is included in durs, least_common_multiple is divisible by 4
+            ppq = least_common_multiple // 4
+            return max(ppq, 1)
 
     def _handle_initial_staffdef(self, staffdef_el):
         """
@@ -433,7 +452,7 @@ class MeiParser(object):
             Returns a partitura part filled with meter, time signature, key signature information.
         """
         # Fetch the namespace of the staff.
-        id = staffdef_el.attrib[self._ns_name("id", XML_NAMESPACE)]
+        id = staffdef_el.attrib.get(self._ns_name("id", XML_NAMESPACE), "")
         label_el = staffdef_el.find(self._ns_name("label"))
         name = label_el.text if label_el is not None else ""
         ppq_attrib = staffdef_el.get("ppq")
@@ -468,7 +487,7 @@ class MeiParser(object):
             group_symbol = group_symbol_el.attrib["symbol"]
         label_el = staffgroup_el.find(self._ns_name("label"))
         name = label_el.text if label_el is not None else None
-        id = staffgroup_el.attrib[self._ns_name("id", XML_NAMESPACE)]
+        id = staffgroup_el.attrib.get(self._ns_name("id", XML_NAMESPACE), "")
         staff_group = score.PartGroup(group_symbol, group_name=name, id=id)
         staves_el = staffgroup_el.findall(self._ns_name("staffDef"))
         for s_el in staves_el:
@@ -521,10 +540,14 @@ class MeiParser(object):
         elif note_el.find(self._ns_name("accid")) is not None:
             if note_el.find(self._ns_name("accid")).get("accid") is not None:
                 return SIGN_TO_ALTER[note_el.find(self._ns_name("accid")).get("accid")]
-            else:
+            elif note_el.find(self._ns_name("accid")).get("accid.ges") is not None:
                 return SIGN_TO_ALTER[
                     note_el.find(self._ns_name("accid")).get("accid.ges")
                 ]
+            else:
+                # In case of an empty accid element
+                # e.g., <accid xml:id="g19n7p5l" />, appearing sometimes in pieces in C major
+                return None
         else:
             return None
 
@@ -589,7 +612,21 @@ class MeiParser(object):
         symbolic_duration :
         """
         # symbolic duration
-        symbolic_duration = self._get_symbolic_duration(el)
+
+        if el.get("sameas") is not None:
+            ref_id = el.get("sameas")
+            ref_id = ref_id.lstrip("#")
+            root = self.document.getroot()
+            found_element = root.xpath(
+                f"//*[@xml:id='{ref_id}']", namespaces={"xml": self.ns}
+            )
+            if found_element is not None:
+                symbolic_duration = self._get_symbolic_duration(found_element[0])
+            else:
+                symbolic_duration = 0
+
+        else:
+            symbolic_duration = self._get_symbolic_duration(el)
 
         # duration in ppq
         if el.get("dur.ppq") is not None or el.get("grace") is not None:
@@ -1035,7 +1072,9 @@ class MeiParser(object):
     def _find_dir_positions(self, dir_el, bar_position):
         """Compute the position for a <dir> element.
         Returns an array, one position for each part."""
-        delta_position_beat = float(dir_el.get("tstamp"))
+        # If there is no tstamp element, assume that the direction is at the beginning
+        # of the measure.
+        delta_position_beat = float(dir_el.get("tstamp", 0.0))
         return [
             p.inv_beat_map(p.beat_map(bar_position) + delta_position_beat - 1)
             for p in score.iter_parts(self.parts)
@@ -1148,8 +1187,23 @@ class MeiParser(object):
                 position, measure_number = self._handle_section(
                     element, parts, position, measure_number
                 )
-                # insert the ending element
-                ending_number = int(re.sub("[^0-9]", "", element.attrib["n"]))
+
+                # check for MuseScore ending types
+                msending_match = MSCORE_ENDING_PATTERN.search(
+                    element.attrib.get("type", "")
+                )
+
+                if msending_match:
+                    # Cast as string, since score.Ending expects a string.
+                    # See self._add_ending below. Using integers causes issues unfolding scores
+                    ending_number = str(msending_match.group(1))
+                else:
+                    # NOTE: I'm not sure if all other endings should have "n".
+                    # I would propose to replace element.attrib["n"] with element.attrib.get("n", "1")
+                    # but I'm not sure if this could cause unexpected behavior, so I'm leaving things
+                    # as they are.
+                    ending_number = str(re.sub("[^0-9]", "", element.attrib["n"]))
+
                 self._add_ending(ending_start, position, ending_number, parts)
             # explicit repetition expansions
             elif element.tag == self._ns_name("expansion"):

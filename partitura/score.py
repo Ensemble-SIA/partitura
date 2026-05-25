@@ -713,6 +713,93 @@ class Part(object):
         return [e for e in self.iter_all(LoudnessDirection, include_subclasses=True)]
 
     @property
+    def constant_dynamics_map(self):
+        """A function mapping timeline times to the ConstantLoudnessDirection
+        active at that time. Returns None for times before the first direction,
+        and fills forward after the last direction.
+        The function can take scalar values or lists/arrays of values.
+
+        Note: Currently this function does not consider changes in the time signature, and takes as
+        fallback duration a fixed length of the duration of the first measure in a score.
+
+        Returns
+        -------
+        function
+            The mapping function
+        """
+        cd_it = [e for e in self.dynamics if isinstance(e, ConstantLoudnessDirection)]
+
+        if len(cd_it) == 0:
+            warnings.warn("No constant dynamics found, returning None map")
+            return lambda t: (
+                np.full(np.asarray(t).shape, None) if np.ndim(t) > 0 else None
+            )
+
+        fallback_dur = 2 * self.measures[0].duration
+        directions = np.zeros((len(cd_it), 3))
+        for i, cd in enumerate(cd_it):
+            start = cd.start.t
+            end = (
+                cd.end.t
+                if cd.end is not None
+                else (
+                    cd_it[i + 1].start.t
+                    if i + 1 < len(cd_it) and cd_it[i + 1].start is not None
+                    else start + fallback_dur
+                )
+            )
+            directions[i] = [start, end, i]
+
+        idx_to_direction = {i: cd for i, cd in enumerate(cd_it)}
+        start_times = directions[:, 0]
+        max_idx = len(cd_it) - 1
+
+        def inter_function(t):
+            scalar = np.ndim(t) == 0
+            t = np.atleast_1d(np.asarray(t))
+
+            indices = np.searchsorted(start_times, t, side="right") - 1
+            clipped = np.clip(indices, 0, max_idx)
+
+            result = np.where(
+                indices < 0,
+                None,
+                np.array([idx_to_direction[i] for i in clipped], dtype=object),
+            )
+            return result[0] if scalar else result
+
+        return inter_function
+
+    @property
+    def variable_dynamics_map(self):
+        """A function mapping timeline times to variable Dynamics Markings (i.e., increasing and decreasing ones)
+        at that exact time, or None outside of marked regions.
+        Returns
+        -------
+        function
+            The mapping function
+        """
+        id_it = [
+            e for e in self.dynamics if not isinstance(e, ConstantLoudnessDirection)
+        ]
+
+        if len(id_it) == 0:
+            warnings.warn("No impulsive dynamics found, returning None map")
+            return lambda t: (
+                np.full(np.asarray(t).shape, None) if np.ndim(t) > 0 else None
+            )
+
+        # build a lookup dict: start time -> object
+        time_to_direction = {d.start.t: d for d in id_it if d.start is not None}
+
+        def inter_function(t):
+            if np.ndim(t) == 0:  # scalar
+                return time_to_direction.get(int(t), None)
+            return np.array([time_to_direction.get(int(ti), None) for ti in t])
+
+        return inter_function
+
+    @property
     def tempo_directions(self):
         """Return a list of all tempo direction in the part
 
@@ -723,6 +810,62 @@ class Part(object):
 
         """
         return [e for e in self.iter_all(TempoDirection, include_subclasses=True)]
+
+    @property
+    def tempo_directions_map(self):
+        """A function mapping timeline times to the TempoDirection
+        active at that time. Returns None for times before the first direction,
+        and fills forward after the last direction.
+        The function can take scalar values or lists/arrays of values.
+
+        Returns
+        -------
+        function
+            The mapping function
+        """
+        td_it = self.tempo_directions
+
+        if len(td_it) == 0:
+            warnings.warn("No tempo directions found, returning None map")
+            return lambda t: (
+                np.full(np.asarray(t).shape, None) if np.ndim(t) > 0 else None
+            )
+
+        fallback_dur = 2 * self.measures[0].duration
+        directions = np.zeros((len(td_it), 3))
+        for i, cd in enumerate(td_it):
+            start = cd.start.t
+            end = (
+                cd.end.t
+                if cd.end is not None
+                else (
+                    td_it[i + 1].start.t
+                    if i + 1 < len(td_it) and td_it[i + 1].start is not None
+                    else start + fallback_dur
+                )
+            )
+            directions[i] = [start, end, i]
+
+        # index-to-object lookup
+        idx_to_direction = {i: td for i, td in enumerate(td_it)}
+        start_times = directions[:, 0]
+        max_idx = len(td_it) - 1
+
+        def inter_function(t):
+            scalar = np.ndim(t) == 0
+            t = np.atleast_1d(np.asarray(t))
+
+            indices = np.searchsorted(start_times, t, side="right") - 1
+            clipped = np.clip(indices, 0, max_idx)
+
+            result = np.where(
+                indices < 0,
+                None,
+                np.array([idx_to_direction[i] for i in clipped], dtype=object),
+            )
+            return result[0] if scalar else result
+
+        return inter_function
 
     @property
     def cadences(self):
@@ -2111,11 +2254,12 @@ class Note(GenericNote):
 
     """
 
-    def __init__(self, step, octave, alter=None, **kwargs):
+    def __init__(self, step, octave, alter=None, is_grace_chord=False, **kwargs):
         super().__init__(**kwargs)
         self.step = step.upper()
         self.octave = octave
         self.alter = alter
+        self.is_grace_chord = is_grace_chord
         self.beam = None
 
     def assign_beam(self, beam):
