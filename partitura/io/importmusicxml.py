@@ -1547,7 +1547,10 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     #   - This note has no <chord/>: standalone for now. chord_root_note_id
     #     stays at the GenericNote default (None). If a subsequent <chord/>
     #     note arrives, it'll upgrade us (above).
-    if chord is not None:
+    # prev_note is None only on a malformed <chord> on the first note of a part
+    # (upstream v1.9.0 warns + treats as standalone). No root to point at; leave
+    # chord_root_note_id at the GenericNote default (None).
+    if chord is not None and prev_note is not None:
         if prev_note.chord_root_note_id is None:
             prev_note.chord_root_note_id = prev_note.id
         note.chord_root_note_id = prev_note.chord_root_note_id
