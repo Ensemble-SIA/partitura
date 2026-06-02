@@ -1535,7 +1535,7 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     # start.t in document order with the first marked by no <chord/> and
     # subsequent members marked by <chord/>). This fork attaches an
     # explicit chord_root_note_id pointer so downstream consumers can find
-    # chord siblings by EUUID dereference.
+    # chord siblings by note_id dereference.
     #
     # Logic mirrors the existing prev_note state machine the function
     # already maintains for chord position/duration inheritance:
