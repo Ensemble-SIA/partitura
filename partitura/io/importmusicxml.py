@@ -14,7 +14,6 @@ import zipfile
 from typing import Union, Optional, List
 import numpy as np
 from lxml import etree
-from collections import defaultdict
 
 # lxml does XSD validation too but has problems with the MusicXML 3.1 XSD, so we use
 # the xmlschema package for validating MusicXML against the definition
@@ -397,7 +396,7 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
 
         position = 0
         ongoing = {}
-        ongoing["tie_notes"] = defaultdict(dict)
+        ongoing["tie_records"] = []
         doc_order = 0
         # add new page and system at start of part
         _handle_new_page(position, part, ongoing)
@@ -414,45 +413,42 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
                 ignore_invisible_objects,
             )
 
-        # add collected ties (Ensemble fork: two-tier voiced/unvoiced match;
-        # see the _handle_note tie block for the collision rationale). Pass 1
-        # matches within (staff, voice, pitch) by timepoint so same-pitch ties
-        # in different voices cannot collide; pass 2 falls back to
-        # (staff, pitch) for the cross-voice ties pass 1 left unlinked.
-        tie_notes = ongoing["tie_notes"]
-        if len(tie_notes["voiced_keys"]) > 0:
-            matched_starts = set()
-            matched_stops = set()
-            # Pass 1 — voiced primary: (staff, voice, pitch)
-            for staff, voice, pitch in tie_notes["voiced_keys"].keys():
-                starting_tie_dict = tie_notes[("start", staff, voice, pitch)]
-                stopping_tie_dict = tie_notes[("stop", staff, voice, pitch)]
-                for tie_timepoint, start_note in starting_tie_dict.items():
-                    stop_note = stopping_tie_dict.get(tie_timepoint)
-                    if stop_note is not None:
-                        stop_note.tie_prev = start_note
-                        start_note.tie_next = stop_note
-                        matched_starts.add(id(start_note))
-                        matched_stops.add(id(stop_note))
-            # Pass 2 — unvoiced fallback: (staff, pitch), only notes pass 1
-            # left unmatched (a held pitch whose voice changes mid-chain).
-            for staff, pitch in tie_notes["unvoiced_keys"].keys():
-                starting_u = tie_notes[("start_u", staff, pitch)]
-                stopping_u = tie_notes[("stop_u", staff, pitch)]
-                for tie_timepoint, stop_list in stopping_u.items():
-                    start_list = starting_u.get(tie_timepoint, [])
-                    for stop_note in stop_list:
-                        if id(stop_note) in matched_stops:
-                            continue
-                        for start_note in start_list:
-                            if id(start_note) in matched_starts:
-                                continue
-                            stop_note.tie_prev = start_note
-                            start_note.tie_next = stop_note
-                            matched_starts.add(id(start_note))
-                            matched_stops.add(id(stop_note))
-                            break
-        del ongoing["tie_notes"]
+        # Resolve tie chains (Ensemble fork). MusicXML 4.0 matches ties by
+        # PITCH: a <tie type="stop"> continues the most recent still-open
+        # same-pitch tie-start, across any intervening different-pitch notes
+        # (a sustained inner voice notated in one voice) — NOT by temporal
+        # adjacency. Upstream's timepoint matcher (PR #502) required the
+        # start's end to equal the stop's onset, so it dropped every valid
+        # non-adjacent tie. Here: walk the tie-bearing notes in position
+        # order, keep the most recent open start per (staff, voice, pitch),
+        # and link each stop to it. A (staff, pitch) unvoiced keyspace is the
+        # fallback for cross-voice ties (a held pitch whose voice changes
+        # mid-chain). An orphan stop (no open start) gets no back-pointer —
+        # tie_from_stop already marks it a continuation for onset purposes.
+        records = ongoing["tie_records"]
+        if records:
+            records.sort(key=lambda r: r["pos"])
+            open_voiced = {}  # (staff, voice, pitch) -> most recent open start
+            open_unvoiced = {}  # (staff, pitch) -> most recent open start
+            for r in records:
+                note = r["note"]
+                vk = (r["staff"], r["voice"], r["pitch"])
+                uk = (r["staff"], r["pitch"])
+                if r["is_stop"]:
+                    prev = open_voiced.get(vk)
+                    if prev is None:
+                        prev = open_unvoiced.get(uk)
+                    if prev is not None:
+                        note.tie_prev = prev
+                        prev.tie_next = note
+                        # consume the matched start from both keyspaces
+                        for _d in (open_voiced, open_unvoiced):
+                            for _k in [_k for _k, _v in _d.items() if _v is prev]:
+                                del _d[_k]
+                if r["is_start"]:
+                    open_voiced[vk] = note
+                    open_unvoiced[uk] = note
+        del ongoing["tie_records"]
 
         # complete unfinished endings
         for o in part.iter_all(score.Ending, mode="ending"):
@@ -1586,39 +1582,24 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     ties = e.findall("tie")
     if len(ties) > 0:
         tie_types = set(tie.attrib["type"] for tie in ties)
-        tie_pitch = getattr(note, "midi_pitch", "rest")
-        # Ensemble fork: scope tie matching by (staff, voice), not pitch
-        # alone. Upstream keys the tie dicts on pitch and matches by
-        # timepoint; two same-pitch notes tied at the same timepoint in
-        # different voices collide on the (pitch, timepoint) dict key (one
-        # silently overwrites the other), dropping a whole tie chain — Bach
-        # BWV 875 bars 22-23, v1 vs v2 G4. Primary key adds (staff, voice).
-        # A second unvoiced (staff, pitch) keyspace is populated as a
-        # fallback for cross-voice ties, where a held pitch changes voice
-        # mid-chain (Brahms Op 118/2 bars 18-19 v1->v2 E4, Liszt Ballade 2
-        # bars 33-34 v5->v6 F#3); the matcher tries voiced first, then
-        # unvoiced. These pointers are note_ids (mn-...), never EUUIDs.
-        tie_staff = getattr(note, "staff", None)
-        tie_voice = getattr(note, "voice", None)
-        # collect the keys to resolve at part end
-        ongoing["tie_notes"]["voiced_keys"][(tie_staff, tie_voice, tie_pitch)] = None
-        ongoing["tie_notes"]["unvoiced_keys"][(tie_staff, tie_pitch)] = None
-
+        # Ensemble fork: record the raw source tie tags now; resolve the
+        # chains by pitch at part end (see _parse_parts). The <tie> element
+        # is SOUND, so a "stop" tag means this note is a continuation (not a
+        # fresh attack) regardless of whether a start can be matched —
+        # expose that directly for onset consumers.
         if "stop" in tie_types:
-            ongoing["tie_notes"][("stop", tie_staff, tie_voice, tie_pitch)][
-                position
-            ] = note
-            ongoing["tie_notes"][("stop_u", tie_staff, tie_pitch)].setdefault(
-                position, []
-            ).append(note)
-
-        if "start" in tie_types:
-            ongoing["tie_notes"][("start", tie_staff, tie_voice, tie_pitch)][
-                position + duration
-            ] = note
-            ongoing["tie_notes"][("start_u", tie_staff, tie_pitch)].setdefault(
-                position + duration, []
-            ).append(note)
+            note.tie_from_stop = True
+        ongoing["tie_records"].append(
+            {
+                "note": note,
+                "pos": position,
+                "staff": getattr(note, "staff", None),
+                "voice": getattr(note, "voice", None),
+                "pitch": getattr(note, "midi_pitch", "rest"),
+                "is_start": "start" in tie_types,
+                "is_stop": "stop" in tie_types,
+            }
+        )
 
     notations = e.find("notations")
 

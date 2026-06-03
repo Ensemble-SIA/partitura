@@ -1995,6 +1995,16 @@ class GenericNote(TimedObject):
         # natively has no Chord container, so chord identity is only
         # meaningful when the source had explicit <chord/> markers.
         self.chord_root_note_id = None
+        # Ensemble fork: tie_from_stop records the raw source <tie type="stop">
+        # tag (SOUND continuation marker; MusicXML 4.0 separates <tie> sound
+        # from <tied> notation). True iff the source marked this note a tie
+        # continuation, INDEPENDENT of whether the matcher could link it to a
+        # start. This is the authoritative "is this an onset?" signal — a
+        # tie-stop is never a fresh attack, even an orphan/non-adjacent one —
+        # so onset consumers key on this, not on tie_prev linkage. Set during
+        # MusicXML import in io/importmusicxml.py:_handle_note; other importers
+        # leave it False.
+        self.tie_from_stop = False
 
         # maintain a list of attributes to update when cloning this instance
         self._ref_attrs.extend(
