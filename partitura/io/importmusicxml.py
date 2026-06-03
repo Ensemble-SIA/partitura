@@ -414,20 +414,44 @@ def _parse_parts(document, part_dict, ignore_invisible_objects=False):
                 ignore_invisible_objects,
             )
 
-        # add collected ties
-        if len(ongoing["tie_notes"]["pitches"].keys()) > 0:
-            pitches_to_check = set(ongoing["tie_notes"]["pitches"].keys())
-            for pitch_to_check in pitches_to_check:
-
-                starting_tie_dict = ongoing["tie_notes"][("start", pitch_to_check)]
-                stopping_tie_dict = ongoing["tie_notes"][("stop", pitch_to_check)]
-
-                for tie_timepoint in starting_tie_dict.keys():
-                    if tie_timepoint in stopping_tie_dict:
-                        start_note = starting_tie_dict[tie_timepoint]
-                        stop_note = stopping_tie_dict[tie_timepoint]
+        # add collected ties (Ensemble fork: two-tier voiced/unvoiced match;
+        # see the _handle_note tie block for the collision rationale). Pass 1
+        # matches within (staff, voice, pitch) by timepoint so same-pitch ties
+        # in different voices cannot collide; pass 2 falls back to
+        # (staff, pitch) for the cross-voice ties pass 1 left unlinked.
+        tie_notes = ongoing["tie_notes"]
+        if len(tie_notes["voiced_keys"]) > 0:
+            matched_starts = set()
+            matched_stops = set()
+            # Pass 1 — voiced primary: (staff, voice, pitch)
+            for staff, voice, pitch in tie_notes["voiced_keys"].keys():
+                starting_tie_dict = tie_notes[("start", staff, voice, pitch)]
+                stopping_tie_dict = tie_notes[("stop", staff, voice, pitch)]
+                for tie_timepoint, start_note in starting_tie_dict.items():
+                    stop_note = stopping_tie_dict.get(tie_timepoint)
+                    if stop_note is not None:
                         stop_note.tie_prev = start_note
                         start_note.tie_next = stop_note
+                        matched_starts.add(id(start_note))
+                        matched_stops.add(id(stop_note))
+            # Pass 2 — unvoiced fallback: (staff, pitch), only notes pass 1
+            # left unmatched (a held pitch whose voice changes mid-chain).
+            for staff, pitch in tie_notes["unvoiced_keys"].keys():
+                starting_u = tie_notes[("start_u", staff, pitch)]
+                stopping_u = tie_notes[("stop_u", staff, pitch)]
+                for tie_timepoint, stop_list in stopping_u.items():
+                    start_list = starting_u.get(tie_timepoint, [])
+                    for stop_note in stop_list:
+                        if id(stop_note) in matched_stops:
+                            continue
+                        for start_note in start_list:
+                            if id(start_note) in matched_starts:
+                                continue
+                            stop_note.tie_prev = start_note
+                            start_note.tie_next = stop_note
+                            matched_starts.add(id(start_note))
+                            matched_stops.add(id(stop_note))
+                            break
         del ongoing["tie_notes"]
 
         # complete unfinished endings
@@ -1563,14 +1587,38 @@ def _handle_note(e, position, part, ongoing, prev_note, doc_order, prev_beam=Non
     if len(ties) > 0:
         tie_types = set(tie.attrib["type"] for tie in ties)
         tie_pitch = getattr(note, "midi_pitch", "rest")
-        # roundabout way of collecting the pitches
-        ongoing["tie_notes"]["pitches"][tie_pitch] = None
+        # Ensemble fork: scope tie matching by (staff, voice), not pitch
+        # alone. Upstream keys the tie dicts on pitch and matches by
+        # timepoint; two same-pitch notes tied at the same timepoint in
+        # different voices collide on the (pitch, timepoint) dict key (one
+        # silently overwrites the other), dropping a whole tie chain — Bach
+        # BWV 875 bars 22-23, v1 vs v2 G4. Primary key adds (staff, voice).
+        # A second unvoiced (staff, pitch) keyspace is populated as a
+        # fallback for cross-voice ties, where a held pitch changes voice
+        # mid-chain (Brahms Op 118/2 bars 18-19 v1->v2 E4, Liszt Ballade 2
+        # bars 33-34 v5->v6 F#3); the matcher tries voiced first, then
+        # unvoiced. These pointers are note_ids (mn-...), never EUUIDs.
+        tie_staff = getattr(note, "staff", None)
+        tie_voice = getattr(note, "voice", None)
+        # collect the keys to resolve at part end
+        ongoing["tie_notes"]["voiced_keys"][(tie_staff, tie_voice, tie_pitch)] = None
+        ongoing["tie_notes"]["unvoiced_keys"][(tie_staff, tie_pitch)] = None
 
         if "stop" in tie_types:
-            ongoing["tie_notes"][("stop", tie_pitch)][position] = note
+            ongoing["tie_notes"][("stop", tie_staff, tie_voice, tie_pitch)][
+                position
+            ] = note
+            ongoing["tie_notes"][("stop_u", tie_staff, tie_pitch)].setdefault(
+                position, []
+            ).append(note)
 
         if "start" in tie_types:
-            ongoing["tie_notes"][("start", tie_pitch)][position + duration] = note
+            ongoing["tie_notes"][("start", tie_staff, tie_voice, tie_pitch)][
+                position + duration
+            ] = note
+            ongoing["tie_notes"][("start_u", tie_staff, tie_pitch)].setdefault(
+                position + duration, []
+            ).append(note)
 
     notations = e.find("notations")
 
